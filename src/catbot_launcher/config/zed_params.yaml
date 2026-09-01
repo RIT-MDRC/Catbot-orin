@@ -1,0 +1,41 @@
+# CatBot ZED parameter overrides
+#
+# The ZED wrapper's built-in defaults remain active because every example below
+# is commented out. To change a setting, replace `ros__parameters: {}` with
+# `ros__parameters:`, then uncomment the desired section and set a new value.
+# Keep the indentation shown in the examples.
+
+/**:
+  ros__parameters: {}
+
+  #   general:
+  #     pub_frame_rate: 0.0          # Default: 0.0 (no publishing limit)
+  #     pub_downscale_factor: 2.0    # Default: 2.0
+  #
+  #   video:
+  #     publish_rgb: true            # Default: true
+  #     publish_left_right: false    # Default: false
+  #     publish_raw: false           # Default: false
+  #
+  #   depth:
+  #     depth_mode: 'NEURAL_LIGHT'   # Default: NEURAL_LIGHT
+  #     min_depth: 0.01              # ZED X default: 0.01 meters
+  #     max_depth: 15.0              # ZED X default: 15.0 meters
+  #     publish_depth_map: true      # Default: true
+  #     publish_point_cloud: true    # Default: true
+  #     point_cloud_freq: 10.0       # Default: 10.0 Hz
+  #
+  #   sensors:
+  #     publish_imu: true            # Default: true
+  #     sensors_pub_rate: 100.0      # Default: 100.0 Hz
+  #
+  #   pos_tracking:
+  #     pos_tracking_enabled: true   # Default: true
+  #     publish_tf: true             # Default: true
+  #     publish_map_tf: true         # Default: true
+  #
+  #   object_detection:
+  #     od_enabled: false            # Default: false
+  #
+  #   body_tracking:
+  #     bt_enabled: false            # Default: false

@@ -1,0 +1,48 @@
+# CatBot ROS 2 workspace
+
+This workspace contains the `catbot_launcher` package and StereoLabs' official
+ROS 2 wrapper. The main launch file opens the camera and publishes its video,
+depth, point-cloud, sensor, odometry, and TF data as ROS 2 topics.
+
+## Build
+
+```bash
+cd /home/catbot/ROS/ros2_ws
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install
+source install/setup.bash
+```
+
+## Launch
+
+```bash
+ros2 launch catbot_launcher main.launch.py
+```
+
+The default model is `zedx`. Select the correct model and, optionally, a camera
+serial number at launch time:
+
+```bash
+ros2 launch catbot_launcher main.launch.py \
+  camera_model:=zedx camera_name:=zed serial_number:=0
+```
+
+Common camera model values include `zedx`, `zedxm`, `zed2`, `zed2i`, `zed`, and
+`zedm`. Press Ctrl+C to stop the camera node.
+
+Runtime parameters can be overridden in
+`src/catbot_launcher/config/zed_params.yaml`. Its examples are commented out,
+so the StereoLabs defaults are used until an entry is uncommented. A different
+parameter file can also be selected without rebuilding:
+
+```bash
+ros2 launch catbot_launcher main.launch.py config_file:=/path/to/zed_params.yaml
+```
+
+Inspect the published data with:
+
+```bash
+ros2 topic list | grep '^/zed/'
+ros2 topic hz /zed/zed_node/rgb/image_rect_color
+ros2 topic echo /zed/zed_node/pose --once
+```
