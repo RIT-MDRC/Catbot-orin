@@ -11,6 +11,7 @@
 
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+  <exec_depend>foxglove_bridge</exec_depend>
   <exec_depend>zed_wrapper</exec_depend>
 
   <test_depend>ament_flake8</test_depend>

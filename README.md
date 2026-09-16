@@ -1,14 +1,16 @@
 # CatBot ROS 2 workspace
 
 This workspace contains the `catbot_launcher` package and StereoLabs' official
-ROS 2 wrapper. The main launch file opens the camera and publishes its video,
-depth, point-cloud, sensor, odometry, and TF data as ROS 2 topics.
+ROS 2 wrapper. The main launch file opens the camera, publishes its video,
+depth, point-cloud, sensor, odometry, and TF data as ROS 2 topics, and starts a
+Foxglove bridge for remote diagnostics.
 
 ## Build
 
 ```bash
 cd /home/catbot/ROS/ros2_ws
 source /opt/ros/humble/setup.bash
+rosdep install --from-paths src --ignore-src -r -y
 colcon build --symlink-install
 source install/setup.bash
 ```
@@ -18,6 +20,9 @@ source install/setup.bash
 ```bash
 ros2 launch catbot_launcher main.launch.py
 ```
+
+Foxglove can connect to `ws://<robot-ip>:8765`. The bridge listens on all
+network interfaces, so the robot's firewall must allow inbound TCP port 8765.
 
 The default model is `zedx`. Select the correct model and, optionally, a camera
 serial number at launch time:

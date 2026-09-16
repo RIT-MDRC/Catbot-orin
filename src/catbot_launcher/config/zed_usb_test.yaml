@@ -1,0 +1,10 @@
+# Diagnostic profile for ZED 2i USB connection failures.
+# Reduce native capture bandwidth; this is not a fix for a faulty USB link.
+/**:
+  ros__parameters:
+    debug:
+      debug_common: true
+      debug_grab: true
+    general:
+      grab_resolution: 'HD720'
+      grab_frame_rate: 15

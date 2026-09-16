@@ -1,13 +1,19 @@
 # CatBot ZED parameter overrides
 #
-# The ZED wrapper's built-in defaults remain active because every example below
-# is commented out. To change a setting, replace `ros__parameters: {}` with
-# `ros__parameters:`, then uncomment the desired section and set a new value.
+# Debug Common is enabled; other settings retain the ZED wrapper's defaults.
+# To change another setting, uncomment the desired section and set a new value.
 # Keep the indentation shown in the examples.
 
 /**:
-  ros__parameters: {}
-
+  ros__parameters:
+    # debug:
+    #   debug_common: true
+    general:
+      grab_resolution: 'HD720'
+      grab_frame_rate: 30
+      pub_frame_rate: 5.0
+    depth:
+      point_cloud_freq: 10.0
   #   general:
   #     pub_frame_rate: 0.0          # Default: 0.0 (no publishing limit)
   #     pub_downscale_factor: 2.0    # Default: 2.0
