@@ -51,3 +51,10 @@ ros2 topic list | grep '^/zed/'
 ros2 topic hz /zed/zed_node/rgb/image_rect_color
 ros2 topic echo /zed/zed_node/pose --once
 ```
+
+## Simulation with policy inference on the Pi
+
+Use `catbot_launcher simulation.launch.py` for a headless simulation on the Orin
+and policy/foundation on `192.168.0.3`. See [the simulation setup guide](docs/SIMULATION.md)
+for the required changes in all three repositories, artifacts, launch arguments,
+and compute metrics. This launch uses the existing DDS configuration.
