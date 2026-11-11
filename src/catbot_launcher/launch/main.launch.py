@@ -1,5 +1,6 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -21,6 +22,8 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
+            DeclareLaunchArgument("enable_camera", default_value="true"),
+            DeclareLaunchArgument("enable_foxglove", default_value="true"),
             DeclareLaunchArgument(
                 "camera_model",
                 default_value="zed2i",
@@ -49,6 +52,7 @@ def generate_launch_description():
             ),
             IncludeLaunchDescription(
                 zed_launch_file,
+                condition=IfCondition(LaunchConfiguration("enable_camera")),
                 launch_arguments={
                     "camera_model": camera_model,
                     "camera_name": camera_name,
@@ -60,6 +64,7 @@ def generate_launch_description():
             ),
             Node(
                 package="foxglove_bridge",
+                condition=IfCondition(LaunchConfiguration("enable_foxglove")),
                 executable="foxglove_bridge",
                 name="foxglove_bridge",
                 output="screen",

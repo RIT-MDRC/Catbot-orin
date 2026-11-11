@@ -89,7 +89,7 @@ mapping. Policy smoothing/clipping happens once, on the Pi; simulator backlash i
 then applied. Physics and contact/motion histories use the training configuration.
 Domain randomization and automatic episode resets are disabled for this compute
 experiment. A fallen robot stays fallen. Restart the **entire launch** to reset
-both physics and policy history. There is no independent reset service or viewer.
+both physics and policy history. There is no independent reset service or native MuJoCo viewer; use Foxglove below.
 
 The default velocity command is zero. For example, on either machine:
 
@@ -107,7 +107,39 @@ Loss of the SSH lease also stops that group (10-second lease plus cleanup grace)
 
 Use one simulation session per DDS domain and stop any existing hardware/policy
 launch before starting this one: the existing absolute ROS topic names are shared.
-No camera or Foxglove process is started by this launch.
+This launch includes `main.launch.py`, starting the camera and exactly one Foxglove
+bridge alongside simulation. The regular camera launch still works by itself.
+Camera arguments (`camera_model`, `camera_name`, `serial_number`, `config_file`)
+are also accepted by the simulation launch. Use `enable_camera:=false` to run
+simulation and Foxglove without the camera. If a Foxglove bridge is already running,
+use `enable_foxglove:=false` to avoid a second listener on port 8765.
+
+## View the simulated robot in Foxglove
+
+Connect Foxglove to `ws://<orin-ip>:8765`, add a **3D** panel, select `sim/world`
+as the display/fixed frame, and enable `/simulation/model`. Enable the TF frames
+in that panel to inspect individual links. The geometry arrives as
+`visualization_msgs/msg/MarkerArray`, with body transforms on `/tf` at up to 30 Hz.
+Geometry is retained and repeated once per second so reconnecting viewers can
+load it. No URDF, mesh download, or browser-side MuJoCo renderer is needed.
+
+The worker reads geometry and colors from the selected run's compiled model,
+including joint offsets and the actual simulated base pose. Boxes, cylinders,
+spheres, ellipsoids and capsules are supported; capsules are drawn as a cylinder
+and two spheres. Infinite planes appear as finite thin boxes. Textures are not
+reproduced; unsupported geometry types are reported in the worker log and omitted.
+Rendering snapshots use forward kinematics from simulated joint positions, not
+requested motor targets. The Pi does no visualization work.
+
+Simulation uses its own `sim/world` TF root with uniquely prefixed body frames.
+The physical ZED camera retains its existing TF root: use another 3D panel with
+the camera's frame for its point cloud, or an Image panel for video/depth. There
+is no fabricated transform aligning the real room with the simulated world.
+A calibrated transform would be needed to overlay those two scenes accurately.
+
+Update both this workspace and the simulation repository for visualization;
+the Pi code does not change. Rebuild `catbot_sim` and `catbot_launcher` on the
+Orin after installing their declared `tf2_ros` and `visualization_msgs` dependencies.
 
 ## Observe compute capacity on the Pi
 

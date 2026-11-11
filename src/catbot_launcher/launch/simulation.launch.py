@@ -1,9 +1,11 @@
 """Run Orin simulation and a leased foundation/policy session on the Pi."""
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, Shutdown
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, Shutdown
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
@@ -32,6 +34,11 @@ def generate_launch_description():
     return LaunchDescription(
         declarations
         + [
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    [FindPackageShare("catbot_launcher"), "/launch/main.launch.py"]
+                )
+            ),
             Node(
                 package="catbot_sim",
                 executable="remote",

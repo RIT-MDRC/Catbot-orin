@@ -55,6 +55,8 @@ ros2 topic echo /zed/zed_node/pose --once
 ## Simulation with policy inference on the Pi
 
 Use `catbot_launcher simulation.launch.py` for a headless simulation on the Orin
-and policy/foundation on `192.168.0.3`. See [the simulation setup guide](docs/SIMULATION.md)
+and policy/foundation on `192.168.0.3`, together with the existing camera and
+Foxglove bridge. The simulated model is available on `/simulation/model` in the
+`sim/world` frame. Use `enable_camera:=false` when no camera is attached. See [the simulation setup guide](docs/SIMULATION.md)
 for the required changes in all three repositories, artifacts, launch arguments,
 and compute metrics. This launch uses the existing DDS configuration.

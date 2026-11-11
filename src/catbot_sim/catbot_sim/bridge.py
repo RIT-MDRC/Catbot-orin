@@ -17,6 +17,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
 
 from catbot_interfaces.msg import ActuatorPositionCommand, PolicyFeedback
+from catbot_sim.visualization import ScenePublisher
 
 
 class Bridge(Node):
@@ -81,6 +82,10 @@ class Bridge(Node):
             ActuatorPositionCommand, "/simulation/control/position", self.position, 1
         )
         self.create_subscription(Twist, "/policy/cmd_vel", self.velocity, 1)
+        self.visualization = ScenePublisher(self)
+        self.visual_scene = None
+        self.visual_poses = None
+        self.create_timer(1 / 30, self.publish_visualization)
         self.process = subprocess.Popen(
             [
                 str(param("uv_executable", "uv")),
@@ -145,11 +150,23 @@ class Bridge(Node):
             self.command = values
 
     def latest(self, payload):
+        # Keep visualization independently: physics feedback uses a latest-only queue.
+        with self.lock:
+            if "scene" in payload:
+                self.visual_scene = payload["scene"]
+            if "poses" in payload:
+                self.visual_poses = payload["poses"]
         try:
             self.messages.get_nowait()
         except queue.Empty:
             pass
         self.messages.put_nowait(payload)
+
+    def publish_visualization(self):
+        with self.lock:
+            scene, poses = self.visual_scene, self.visual_poses
+        if scene is not None and poses is not None:
+            self.visualization.publish(scene, poses)
 
     def read_worker(self):
         line = self.process.stdout.readline()
@@ -160,6 +177,10 @@ class Bridge(Node):
     def run_worker(self):
         try:
             first = self.read_worker()
+            if "scene" not in first or "poses" not in first:
+                raise ValueError(
+                    "Update the simulation repository: worker lacks visualization data"
+                )
             contract = first["contract"]
             contract["mapping"] = self.mapping
             self.contract = contract
