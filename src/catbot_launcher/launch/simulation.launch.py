@@ -10,7 +10,10 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
     defaults = {
+        "enable_camera": "false",
         "remote_host": "192.168.0.3",
+        "remote_user": "catbot",
+        "remote_workspace": "/home/catbot/main",
         "remote_environment": "/opt/ros/humble/setup.bash",
         "device": "cpu",
         "uv_executable": "uv",
@@ -18,8 +21,6 @@ def generate_launch_description():
         "startup_timeout": "120.0",
     }
     required = [
-        "remote_user",
-        "remote_workspace",
         "policy_bundle",
         "remote_mapping_file",
         "rollout_repository",
