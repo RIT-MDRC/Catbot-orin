@@ -27,9 +27,15 @@ class Bridge(Node):
         def param(name, default):
             return self.declare_parameter(name, default).value
 
-        repository = (
-            Path(str(param("simulation_repository", ""))).expanduser().resolve()
-        )
+        repository = Path(str(param("rollout_repository", ""))).expanduser().resolve()
+        if (
+            not (repository / "pyproject.toml").is_file()
+            or not (repository / "src/catbot_rollout/worker.py").is_file()
+        ):
+            raise ValueError(
+                "rollout_repository must point to the initialized "
+                "external/catbot_sim_rollout submodule"
+            )
         run = Path(str(param("run_directory", ""))).expanduser().resolve()
         mapping_path = Path(str(param("mapping_file", ""))).expanduser()
         self.mapping = json.loads(mapping_path.read_text())
@@ -95,7 +101,7 @@ class Bridge(Node):
                 str(repository),
                 "python",
                 "-m",
-                "catbot.ros_worker",
+                "catbot_rollout.worker",
                 "--run-directory",
                 str(run),
                 "--device",
@@ -179,7 +185,7 @@ class Bridge(Node):
             first = self.read_worker()
             if "scene" not in first or "poses" not in first:
                 raise ValueError(
-                    "Update the simulation repository: worker lacks visualization data"
+                    "Update the rollout submodule: worker lacks visualization data"
                 )
             contract = first["contract"]
             contract["mapping"] = self.mapping

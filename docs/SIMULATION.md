@@ -18,10 +18,15 @@ not measure the physical CAN/sensor workload.
 
 ## Prepare on the target machines
 
-Deploy the changes in **all three repositories** before building:
+Initialize the shared rollout submodule in both workspaces before building:
 
-- Orin: this workspace and the updated `catbot_mujoco_sim` checkout.
-- Pi: updated Catbot `feat/update-main` checkout.
+- Orin: this workspace and its `external/catbot_sim_rollout` submodule.
+- Pi: updated Catbot `feat/update-main` checkout with the same submodule revision.
+
+In each workspace, run `git submodule update --init external/catbot_sim_rollout`.
+The worker is maintained in `RIT-MDRC/catbot_sim_rollout`, with a pinned Git
+dependency on the simulation physics package. A separate training checkout is
+no longer needed. Only install the worker environment on the simulation host.
 
 The Orin workspace vendors `catbot_interfaces` from Catbot commit
 `bab64ffb21f62149cc60ba26ed8143af47d32ab4`. Keep the message files identical on
@@ -37,7 +42,7 @@ colcon build --symlink-install --packages-select catbot_interfaces foundation ca
 On the Orin, prepare the simulation environment separately from ROS's Python:
 
 ```bash
-cd /absolute/path/to/catbot_mujoco_sim
+cd /absolute/path/to/catbot-orin/external/catbot_sim_rollout
 uv sync --locked
 cd /absolute/path/to/catbot-orin
 source /opt/ros/humble/setup.bash
@@ -45,7 +50,7 @@ colcon build --symlink-install --packages-select catbot_interfaces catbot_sim ca
 source install/setup.bash
 ```
 
-The simulation repository currently requires Python 3.14 and its locked mjlab,
+The rollout repository requires Python 3.14 and its locked mjlab,
 MuJoCo, Warp, and PyTorch dependencies. Their installation on the target Orin must
 succeed before launch; the bridge uses `uv run --locked` and does not import them
 into ROS's Python. CPU simulation is the default. `device:=cuda:0` can be selected
@@ -73,7 +78,7 @@ ros2 launch catbot_launcher simulation.launch.py \
   remote_environment:=/absolute/pi/path/to/ros-dds-setup.bash \
   policy_bundle:=/absolute/pi/path/to/policy_bundle \
   remote_mapping_file:=/absolute/pi/path/to/default_mapping.json \
-  simulation_repository:=/absolute/orin/path/to/catbot_mujoco_sim \
+  rollout_repository:=/absolute/orin/path/to/catbot-orin/external/catbot_sim_rollout \
   run_directory:=/absolute/orin/path/to/training_run \
   mapping_file:=/absolute/orin/path/to/default_mapping.json
 ```
@@ -137,7 +142,7 @@ the camera's frame for its point cloud, or an Image panel for video/depth. There
 is no fabricated transform aligning the real room with the simulated world.
 A calibrated transform would be needed to overlay those two scenes accurately.
 
-Update both this workspace and the simulation repository for visualization;
+Update this workspace and initialize its pinned rollout submodule for visualization;
 the Pi code does not change. Rebuild `catbot_sim` and `catbot_launcher` on the
 Orin after installing their declared `tf2_ros` and `visualization_msgs` dependencies.
 

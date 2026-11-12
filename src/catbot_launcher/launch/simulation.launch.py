@@ -22,7 +22,7 @@ def generate_launch_description():
         "remote_workspace",
         "policy_bundle",
         "remote_mapping_file",
-        "simulation_repository",
+        "rollout_repository",
         "run_directory",
         "mapping_file",
     ]
@@ -68,7 +68,7 @@ def generate_launch_description():
                     {
                         name: LaunchConfiguration(name)
                         for name in (
-                            "simulation_repository",
+                            "rollout_repository",
                             "run_directory",
                             "mapping_file",
                             "device",

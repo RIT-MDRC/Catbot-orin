@@ -1,3 +1,6 @@
 [submodule "src/zed-ros2-wrapper"]
 	path = src/zed-ros2-wrapper
 	url = https://github.com/stereolabs/zed-ros2-wrapper.git
+[submodule "external/catbot_sim_rollout"]
+	path = external/catbot_sim_rollout
+	url = git@github.com:RIT-MDRC/catbot_sim_rollout.git
