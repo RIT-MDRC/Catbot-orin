@@ -142,11 +142,29 @@ class Bridge(Node):
         self.visual_scene = None
         self.visual_poses = None
         self.create_timer(1 / self.visualization_rate, self.publish_visualization)
+        device = str(param("device", "cpu"))
+        environment = str(param("worker_environment", ""))
+        sync = bool(param("worker_sync", True))
+        worker_env = os.environ.copy()
+        for name in (
+            "PYTHONPATH",
+            "PYTHONHOME",
+            "VIRTUAL_ENV",
+            "UV_PROJECT_ENVIRONMENT",
+        ):
+            worker_env.pop(name, None)
+        if environment:
+            selected = Path(environment).expanduser().resolve()
+            if not sync and not (selected / "bin/python").is_file():
+                raise ValueError(
+                    f"Prepare the CUDA simulator environment at {selected}, or use orin_device:=cpu"
+                )
+            worker_env["UV_PROJECT_ENVIRONMENT"] = str(selected)
         self.process = subprocess.Popen(
             [
                 str(param("uv_executable", "uv")),
                 "run",
-                "--locked",
+                "--locked" if sync else "--no-sync",
                 "--project",
                 str(repository),
                 "python",
@@ -159,13 +177,14 @@ class Bridge(Node):
                 "--mode",
                 self.backend,
                 "--device",
-                str(param("device", "cpu")),
+                device,
             ],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             text=True,
             bufsize=1,
             start_new_session=True,
+            env=worker_env,
         )
         self.thread = threading.Thread(target=self.run_worker, daemon=True)
         self.started = time.monotonic()

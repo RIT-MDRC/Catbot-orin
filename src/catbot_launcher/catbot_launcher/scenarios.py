@@ -33,6 +33,8 @@ BRIDGE_KEYS = (
     "uv_executable",
     "command_timeout",
     "worker_timeout",
+    "worker_environment",
+    "worker_sync",
     "visualization_rate",
     "startup_timeout",
     "sensor_timeout",
@@ -70,6 +72,39 @@ def decode_setting(original: Any, value: str) -> Any:
     raise ValueError("Unsupported launch default type")
 
 
+class ExpandedSettings(dict):
+    """Resolve path templates once, including references to other defaults."""
+
+    def __init__(self, raw):
+        super().__init__()
+        self.raw = raw
+        self.active = set()
+
+    def __missing__(self, key):
+        if key not in self.raw or key in self.active:
+            raise ValueError(f"Unknown or cyclic launch template: {key}")
+        self.active.add(key)
+        try:
+            value = self.raw[key].format_map(self)
+        finally:
+            self.active.remove(key)
+        self[key] = value
+        return value
+
+
+def worker_environment_options(device, project, environment, sync):
+    cuda = str(device).startswith("cuda")
+    if environment == "auto":
+        environment = str(Path(project) / ".venv-cuda") if cuda else ""
+    if sync == "auto":
+        sync = not cuda
+    elif isinstance(sync, str) and sync.lower() in ("true", "false"):
+        sync = sync.lower() == "true"
+    elif not isinstance(sync, bool):
+        raise ValueError("Worker sync options must be auto, true or false")
+    return environment, sync
+
+
 def build_launch(default_scenario="physical_pi"):
     share = Path(get_package_share_directory("catbot_launcher"))
     defaults_path = Path(
@@ -95,11 +130,10 @@ def build_launch(default_scenario="physical_pi"):
         name = LaunchConfiguration("scenario").perform(context)
         backend, policy_host, remote_role = SCENARIOS[name]
         raw = {key: LaunchConfiguration(key).perform(context) for key in defaults}
+        expanded = ExpandedSettings(raw)
         values: dict[str, Any] = {}
         for key, original in defaults.items():
-            value = raw[key].format(
-                workspace=raw["workspace"], camera_name=raw["camera_name"]
-            )
+            value = expanded[key]
             values[key] = decode_setting(original, value)
         for key in (
             "policy_bundle",
@@ -109,6 +143,24 @@ def build_launch(default_scenario="physical_pi"):
             "policy_worker_project",
         ):
             values[key] = str(Path(values[key]).expanduser())
+        for device, project, environment, sync in (
+            ("device", "rollout_repository", "worker_environment", "worker_sync"),
+            (
+                "policy_device",
+                "policy_worker_project",
+                "policy_worker_environment",
+                "policy_worker_sync",
+            ),
+            (
+                "remote_policy_device",
+                "remote_policy_worker_project",
+                "remote_policy_worker_environment",
+                "remote_policy_worker_sync",
+            ),
+        ):
+            values[environment], values[sync] = worker_environment_options(
+                values[device], values[project], values[environment], values[sync]
+            )
         camera = values["enable_camera"]
         if isinstance(camera, bool):
             pass
@@ -155,6 +207,11 @@ def build_launch(default_scenario="physical_pi"):
                     parameters=[
                         {
                             "policy_bundle": values["policy_bundle"],
+                            "policy_device": values["policy_device"],
+                            "policy_worker_environment": values[
+                                "policy_worker_environment"
+                            ],
+                            "policy_worker_sync": values["policy_worker_sync"],
                             "mapping_file": values["mapping_file"],
                             "simulation_mode": True,
                             "policy_python": ParameterValue(
@@ -178,6 +235,12 @@ def build_launch(default_scenario="physical_pi"):
                     output="screen",
                     on_exit=Shutdown(),
                     arguments=[
+                        "--policy-device",
+                        values["remote_policy_device"],
+                        "--policy-worker-environment",
+                        values["remote_policy_worker_environment"],
+                        "--policy-worker-sync",
+                        str(values["remote_policy_worker_sync"]).lower(),
                         "--policy-ros-python",
                         values["remote_policy_ros_python"],
                         "--policy-worker-project",

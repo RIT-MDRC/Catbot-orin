@@ -68,3 +68,9 @@ start the ZED camera and map odometry/IMU plus motor feedback into policy inputs
 Simulation uses the same position-control and joint-state topics as foundation.
 See [the scenario guide](docs/SIMULATION.md) for shared defaults, deployment,
 calibration, sensor estimates and the static-only verification boundary.
+
+Configured Orin workspace: `/home/catbot/projects/ros2_ws`. Orin computation defaults
+to CUDA (`orin_device:=cuda:0`), with `orin_device:=cpu` available for the locked CPU
+environments. CUDA needs a compatible JetPack/Python/PyTorch environment first.
+Download a fixed run with `uv run src/catbot_policy/pull_policy.py ENTITY/PROJECT/RUN_ID model_N.pt`;
+launches use that module's selected local artifacts. Camera settings are unchanged.

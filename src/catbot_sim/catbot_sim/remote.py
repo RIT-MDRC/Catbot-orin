@@ -56,6 +56,11 @@ def main():
     parser.add_argument(
         "--role", choices=["both", "foundation", "policy"], default="both"
     )
+    parser.add_argument("--policy-device", default="cpu")
+    parser.add_argument("--policy-worker-environment", default="")
+    parser.add_argument(
+        "--policy-worker-sync", choices=["true", "false"], default="true"
+    )
     parser.add_argument("--policy-python", default="3.14")
     parser.add_argument("--policy-ros-python", default="/usr/bin/python3")
     parser.add_argument("--policy-worker-project", required=True)
@@ -101,6 +106,9 @@ def main():
     if args.role in ("both", "policy"):
         policy_parameters = {
             "policy_bundle": args.policy_bundle,
+            "policy_device": args.policy_device,
+            "policy_worker_environment": args.policy_worker_environment,
+            "policy_worker_sync": args.policy_worker_sync == "true",
             "mapping_file": args.mapping_file,
             "simulation_mode": True,
             "feedback_timeout": args.feedback_timeout,

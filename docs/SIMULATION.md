@@ -39,36 +39,61 @@ launch. Every key is also a launch argument; CLI values override the defaults.
 `camera_config` and `enable_camera` are additional arguments, defaulting to the
 installed `zed_policy.yaml` and `auto` (on for physical, off for simulation).
 
-Default paths are deliberately concrete and must match your deployment:
+Confirmed target setup: Orin workspace `/home/catbot/projects/ros2_ws`, Pi
+`catbot@192.168.0.3` (alternatively `catbot-pi.local`), passwordless SSH, Ubuntu
+22.04 on both machines, uv available, DDS already configured without an extra
+setup script, and NTP active. `/opt/ros/humble/setup.bash` and `/usr/bin/python3`
+remain the expected ROS defaults. The Pi workspace path remains unconfirmed;
+`remote_workspace` currently retains `/home/catbot/Catbot`. Set it once and the
+remote model/mapping/inference paths follow it automatically.
 
-- Orin workspace: `/home/catbot/ROS/ros2_ws`; `workspace` changes the default
-  `rollout_repository` and `mapping_file` paths together.
-- Pi: `catbot@192.168.0.3`, workspace `/home/catbot/Catbot`.
-- `run_directory`: `/home/catbot/.local/share/catbot/run`, containing the selected
-  run's `config.json` and `model.xml`, on **Orin in every scenario**.
-- `policy_bundle`: `/home/catbot/.local/share/catbot/policies/latest`, on Orin for
-  scenarios 2/4. `remote_policy_bundle` selects the Pi path for scenarios 1/3.
-- `mapping_file`: `{workspace}/default_mapping.json`; `remote_mapping_file` is the
-  matching mapping in the Pi checkout. These must describe the same model order,
-  signs, offsets and limits. The supplied mapping remains provisional.
-- `remote_environment`: `/opt/ros/humble/setup.bash`. Override with your existing
-  ROS/DDS environment setup script if its variables aren't in the login shell.
-- `policy_python` and `remote_policy_python`: `3.14`. These select the inference
-  interpreter through uv (`--python` accepts a version or absolute interpreter path).
-- `policy_ros_python` and `remote_policy_ros_python`: `/usr/bin/python3`. These
-  select only the ROS adapter interpreter and must match the installed ROS ABI.
-- `policy_worker_project` / `remote_policy_worker_project`: the inference uv project
-  inside `Catbot/src/catbot_policy/catbot_policy/inference` on the respective host.
-  Orin's default uses its `external/Catbot` submodule. The worker uses its own
-  `.venv`, ignoring the adapter's inherited Python/virtualenv settings.
+The launch uses only locally selected artifacts. It never picks a W&B project,
+queries W&B, or automatically changes the run at startup. Download a fixed run
+once on each host using the existing policy package script:
+
+```bash
+# Orin, from /home/catbot/projects/ros2_ws:
+uv run src/catbot_policy/pull_policy.py ENTITY/PROJECT/RUN_ID model_N.pt
+# Pi, from its Catbot workspace:
+uv run src/catbot_policy/pull_policy.py ENTITY/PROJECT/RUN_ID model_N.pt
+```
+
+The Orin script and its lockfile are symlinks to the shared Catbot implementation.
+Downloads stay in that policy package's ignored `artifacts/` directory. Its
+`selected` symlink selects one validated run, containing `config.json`, `model.xml`,
+`manifest.json` and `bundle/policy.pt` plus `bundle/policy.json`. This supplies
+both `run_directory` and the host's policy bundle automatically. A failed export
+keeps the previous selection. The compatibility `latest` alias points to
+`selected/bundle`; it does not mean W&B is queried during launch.
+
+An explicit run is required by default; omit the checkpoint only if selecting
+the highest available checkpoint in that **fixed run at download time** is
+intended. Use the same run/checkpoint on both hosts to avoid contract mismatch.
+`--login` remains available. `--latest --entity YOUR_ENTITY` explicitly opts into
+selecting a newer run when downloading. Existing files from the separate rollout
+repository's downloader remain usable via explicit `run_directory` and
+`policy_bundle` overrides; they are not silently scanned or substituted.
+
+Defaults derive from the workspace paths:
+
+- `run_directory`: `{workspace}/external/Catbot/src/catbot_policy/artifacts/selected`.
+- `policy_bundle`: the same directory's `bundle` child for Orin inference.
+- `remote_policy_bundle`: `{remote_workspace}/src/catbot_policy/artifacts/selected/bundle`.
+- `mapping_file`: `{workspace}/default_mapping.json`; the remote mapping is inside
+  `{remote_workspace}/src/catbot_policy/catbot_policy/`. It remains provisional.
+- `rollout_repository` and local/remote inference worker projects are derived from
+  their workspace paths. Templates support references to other defaults, with
+  unknown keys and cycles rejected.
+- `remote_environment`: `/opt/ros/humble/setup.bash`; DDS is inherited unchanged.
+- `policy_python` / `remote_policy_python`: `3.14` selected by uv.
+- `policy_ros_python` / `remote_policy_ros_python`: `/usr/bin/python3`, used only
+  for ROS adapters and required to match the installed ROS ABI.
 
 Example:
 
 ```bash
 ros2 launch catbot_launcher physical_orin.launch.py \
   workspace:=/home/robot/catbot-orin \
-  run_directory:=/home/robot/runs/selected \
-  policy_bundle:=/home/robot/policies/selected \
   policy_python:=3.14 \
   policy_ros_python:=/usr/bin/python3 \
   remote_user:=catbot remote_workspace:=/home/catbot/Catbot \
@@ -99,40 +124,78 @@ source install/setup.bash
 ```
 
 `external/COLCON_IGNORE` prevents colcon traversing either external project.
-Install ROS dependencies from the package manifests, including `nav_msgs`,
-`sensor_msgs`, `tf2_ros`, `visualization_msgs`, and Python YAML. The ROS adapter requires no PyTorch installation. Its interpreter must retain
-ROS Humble's Python ABI and see the sourced ROS/workspace `PYTHONPATH`. A
-system-site-packages virtual environment based on `/usr/bin/python3` is suitable.
-Inference runs in a separate uv-selected Python 3.14 environment, with the exact
-PyTorch version required by the bundle. Prepare it on whichever host runs policy:
+Install the ROS package dependencies, including `nav_msgs`, `sensor_msgs`,
+`tf2_ros`, `visualization_msgs`, and Python YAML. The ROS adapter requires no
+PyTorch installation. Its interpreter must match ROS Humble's Python ABI and see
+the sourced ROS/workspace `PYTHONPATH`. A system-site-packages virtual environment
+based on `/usr/bin/python3` is also suitable. The inference worker remains separate
+on Python 3.14, with the exact PyTorch version required by the downloaded bundle.
+Deploy the same Catbot `Dev` revision pinned by Orin's submodule to the Pi and
+build/source its updated packages for scenarios 1–3. Scenario 4 never invokes SSH.
+
+## Orin CUDA and Pi CPU
+
+`orin_device` defaults to `cuda:0` and supplies both simulation/kinematics `device`
+and Orin `policy_device`. Pi `remote_policy_device` defaults to `cpu`. To switch
+all Orin computation to CPU, use a single override with any scenario:
 
 ```bash
-# Orin (scenarios 2/4)
+ros2 launch catbot_launcher simulation_orin.launch.py orin_device:=cpu
+ros2 launch catbot_launcher simulation_pi.launch.py orin_device:=cpu
+```
+
+For mixed placement, override `device` and `policy_device` independently. The
+selected policy device is included in `/policy/metrics`. CUDA actor timing is
+synchronized so kernel launch time alone is not mistaken for execution time.
+
+**CUDA package compatibility still requires the Orin's JetPack version.**
+The shipped inference lock explicitly installs CPU PyTorch; it cannot enable
+Jetson CUDA. NVIDIA builds must match JetPack, Python 3.14, and the bundle's exact
+PyTorch version. A prerelease or different version remains rejected. See
+[NVIDIA's Jetson installation guidance](https://docs.nvidia.com/deeplearning/frameworks/install-pytorch-jetson-platform/index.html).
+A configured CUDA default is not evidence that a compatible binary is installed.
+
+With CUDA selected, `worker_environment: auto` and
+`policy_worker_environment: auto` select `.venv-cuda` beside each worker's
+`pyproject.toml`. These environments must already contain the compatible GPU
+packages and required dependencies. Their `*_sync: auto` choices disable syncing
+and use `uv run --no-sync` with `UV_PROJECT_ENVIRONMENT` so the CPU lock does not
+replace a prepared NVIDIA build. Both the simulator and inference environments
+need appropriate dependencies. They are distinct projects and virtual environments.
+Override environment paths and sync flags for another prepared environment.
+Missing CUDA interpreters or unavailable CUDA cause an explicit startup failure;
+there is no automatic CPU fallback. Until CUDA compatibility is established,
+`orin_device:=cpu` selects the shipped locked CPU environments instead.
+
+For CPU inference, prepare the environment on whichever host runs the policy:
+
+```bash
+# Orin, from its workspace:
 uv sync --locked --python 3.14 --project external/Catbot/src/catbot_policy/catbot_policy/inference
-# Pi (scenarios 1/3), from its Catbot checkout
+# Pi, from its Catbot workspace:
 uv sync --locked --python 3.14 --project src/catbot_policy/catbot_policy/inference
 ```
 
-The adapter starts `uv run --locked --python <policy_python>` automatically. It
-strips ROS `PYTHONPATH`, `PYTHONHOME` and inherited venv overrides from the worker's
-environment so Python 3.10 ROS extensions cannot leak into Python 3.14. The
-worker project and its `run_worker.py` must be deployed alongside the updated
-shared policy code. No ROS package is imported by the worker.
+CPU simulation uses the rollout project's normal `uv sync --locked` environment.
+The worker launcher clears inherited ROS Python paths and virtualenv overrides
+before selecting its own environment. `policy_uv_executable` and
+`remote_policy_uv_executable` can override uv's executable path. Worker/startup
+limits remain adjustable through the existing timeout parameters.
 
-Configure `policy_uv_executable` or `remote_policy_uv_executable` if uv is not on
-the host's PATH. `policy_startup_timeout` (120 s) bounds worker startup; prepare
-the environment first if package/Python downloads would take longer.
-`policy_worker_timeout` (2 s) bounds each request and its acknowledgement.
-Deploy the same Catbot commit pinned by Orin's `external/Catbot` submodule
-to the Pi, then build/source its updated policy package for scenarios 1–3. The
-isolated-worker source is consolidated on Catbot's `Dev` branch.
-Scenario 4 never invokes SSH.
-SSH uses existing key authentication and known-host configuration, with BatchMode.
+To report versions without starting ROS nodes, policy, cameras or motors, run
+these commands **on the target machines**, not on the development Mac:
 
-Download artifacts with `uv run --locked --project external/catbot_sim_rollout
-catbot-download-policy --entity YOUR_ENTITY`. Its printed run directory supplies
-Orin's `run_directory`; its exported `policy_bundle` supplies whichever machine
-runs inference. Both machines must load the same exported policy/model contract.
+```bash
+/usr/bin/python3 --version
+ls /opt/ros
+uv python list --only-installed
+# Orin only; nvidia-jetpack may be absent even when L4T is installed:
+dpkg-query -W nvidia-jetpack nvidia-l4t-core
+```
+
+Camera model, IMU/odometry topics, tracking configuration, mounting transforms,
+contact estimation and physical calibration settings were deliberately left
+unchanged while simulation is verified first.
 
 ## Common foundation/simulation interface
 

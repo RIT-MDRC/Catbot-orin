@@ -1,17 +1,28 @@
 # Shared defaults for all four scenario launch files; each key is also a CLI argument.
-workspace: /home/catbot/ROS/ros2_ws
+workspace: /home/catbot/projects/ros2_ws
 remote_host: 192.168.0.3
 remote_user: catbot
-remote_workspace: /home/catbot/Catbot
+remote_workspace: /home/catbot/Catbot  # Pi path still needs confirmation
 remote_environment: /opt/ros/humble/setup.bash
-remote_policy_bundle: /home/catbot/.local/share/catbot/policies/latest
-remote_mapping_file: /home/catbot/Catbot/src/catbot_policy/catbot_policy/default_mapping.json
-policy_bundle: /home/catbot/.local/share/catbot/policies/latest
+remote_policy_bundle: '{remote_workspace}/src/catbot_policy/artifacts/selected/bundle'
+remote_mapping_file: '{remote_workspace}/src/catbot_policy/catbot_policy/default_mapping.json'
+policy_bundle: '{workspace}/external/Catbot/src/catbot_policy/artifacts/selected/bundle'
 mapping_file: '{workspace}/default_mapping.json'
 rollout_repository: '{workspace}/external/catbot_sim_rollout'
-run_directory: /home/catbot/.local/share/catbot/run
+run_directory: '{workspace}/external/Catbot/src/catbot_policy/artifacts/selected'
 uv_executable: uv
-device: cpu
+# One override selects CPU for both Orin simulation/kinematics and Orin policy.
+orin_device: cuda:0
+device: '{orin_device}'
+policy_device: '{orin_device}'
+remote_policy_device: cpu
+# CUDA environments must be prepared with JetPack-compatible dependencies first.
+worker_environment: auto
+worker_sync: auto
+policy_worker_environment: auto
+policy_worker_sync: auto
+remote_policy_worker_environment: auto
+remote_policy_worker_sync: auto
 command_timeout: 0.25
 worker_timeout: 2.0
 feedback_timeout: 0.25
@@ -43,7 +54,7 @@ remote_policy_python: '3.14'
 policy_ros_python: /usr/bin/python3
 remote_policy_ros_python: /usr/bin/python3
 policy_worker_project: '{workspace}/external/Catbot/src/catbot_policy/catbot_policy/inference'
-remote_policy_worker_project: /home/catbot/Catbot/src/catbot_policy/catbot_policy/inference
+remote_policy_worker_project: '{remote_workspace}/src/catbot_policy/catbot_policy/inference'
 policy_uv_executable: uv
 remote_policy_uv_executable: uv
 policy_worker_timeout: 2.0
