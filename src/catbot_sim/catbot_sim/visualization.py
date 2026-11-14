@@ -11,12 +11,13 @@ from visualization_msgs.msg import Marker, MarkerArray
 class ScenePublisher:
     """Keep simulation frames separate from the real camera's TF tree."""
 
-    def __init__(self, node):
+    def __init__(self, node, prefix="sim"):
+        self.prefix = prefix
         self.node = node
         self.tf = TransformBroadcaster(node)
         self.publisher = node.create_publisher(
             MarkerArray,
-            "/simulation/model",
+            "/body/model",
             QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL),
         )
         self.scene = None
@@ -24,16 +25,20 @@ class ScenePublisher:
         self.last_markers = float("-inf")
 
     def frame(self, body):
+        if self.scene is None:
+            raise RuntimeError("Model scene is not initialized")
         if body == 0:
-            return "sim/world"
+            return f"{self.prefix}/world"
         # Numeric IDs ensure uniqueness even for unnamed or similarly named bodies.
         name = self.scene["bodies"][body]["name"].replace("/", "_")
-        return f"sim/body_{body}_{name}"
+        return f"{self.prefix}/body_{body}_{name}"
 
     def build_markers(self):
+        if self.scene is None:
+            raise RuntimeError("Model scene is not initialized")
         markers = []
         clear = Marker()
-        clear.header.frame_id = "sim/world"
+        clear.header.frame_id = f"{self.prefix}/world"
         clear.action = Marker.DELETEALL
         markers.append(clear)
         for geom in self.scene["geoms"]:

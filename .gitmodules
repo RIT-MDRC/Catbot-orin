@@ -4,3 +4,7 @@
 [submodule "external/catbot_sim_rollout"]
 	path = external/catbot_sim_rollout
 	url = git@github.com:RIT-MDRC/catbot_sim_rollout.git
+[submodule "external/Catbot"]
+	path = external/Catbot
+	url = git@github.com:RIT-MDRC/Catbot.git
+	branch = Dev

@@ -52,11 +52,19 @@ ros2 topic hz /zed/zed_node/rgb/image_rect_color
 ros2 topic echo /zed/zed_node/pose --once
 ```
 
-## Simulation with policy inference on the Pi
+## Robot operation and load testing
 
-Use `catbot_launcher simulation.launch.py` for a headless simulation on the Orin
-and policy/foundation on `192.168.0.3`, together with the existing camera and
-Foxglove bridge. The simulated model is available on `/simulation/model` in the
-`sim/world` frame. Use `enable_camera:=false` when no camera is attached. See [the simulation setup guide](docs/SIMULATION.md)
-for the shared rollout submodule setup, artifacts, launch arguments,
-and compute metrics. This launch uses the existing DDS configuration.
+Four scenario launch commands share one configuration:
+
+```bash
+ros2 launch catbot_launcher physical_pi.launch.py      # Pi foundation + policy
+ros2 launch catbot_launcher physical_orin.launch.py    # Pi foundation, Orin policy
+ros2 launch catbot_launcher simulation_pi.launch.py    # Orin sim, Pi policy only
+ros2 launch catbot_launcher simulation_orin.launch.py  # Orin sim + policy; Pi idle
+```
+
+All start Foxglove and publish the live model on `/body/model`. Physical scenarios
+start the ZED camera and map odometry/IMU plus motor feedback into policy inputs.
+Simulation uses the same position-control and joint-state topics as foundation.
+See [the scenario guide](docs/SIMULATION.md) for shared defaults, deployment,
+calibration, sensor estimates and the static-only verification boundary.

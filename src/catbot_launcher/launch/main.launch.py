@@ -4,6 +4,7 @@ from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -24,6 +25,8 @@ def generate_launch_description():
         [
             DeclareLaunchArgument("enable_camera", default_value="true"),
             DeclareLaunchArgument("enable_foxglove", default_value="true"),
+            DeclareLaunchArgument("foxglove_address", default_value="0.0.0.0"),
+            DeclareLaunchArgument("foxglove_port", default_value="8765"),
             DeclareLaunchArgument(
                 "camera_model",
                 default_value="zed2i",
@@ -70,8 +73,10 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     {
-                        "address": "0.0.0.0",
-                        "port": 8765,
+                        "address": LaunchConfiguration("foxglove_address"),
+                        "port": ParameterValue(
+                            LaunchConfiguration("foxglove_port"), value_type=int
+                        ),
                     }
                 ],
             ),

@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 import shlex
 import signal
 import subprocess
@@ -52,6 +53,16 @@ sys.exit(child.returncode or 0)
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--role", choices=["both", "foundation", "policy"], default="both"
+    )
+    parser.add_argument("--policy-python", default="3.14")
+    parser.add_argument("--policy-ros-python", default="/usr/bin/python3")
+    parser.add_argument("--policy-worker-project", required=True)
+    parser.add_argument("--policy-uv-executable", default="uv")
+    parser.add_argument("--policy-worker-timeout", type=float, default=2.0)
+    parser.add_argument("--policy-startup-timeout", type=float, default=120.0)
+    parser.add_argument("--feedback-timeout", type=float, default=0.25)
     parser.add_argument("--host", default="192.168.0.3")
     parser.add_argument("--user", required=True)
     parser.add_argument("--workspace", required=True)
@@ -59,6 +70,15 @@ def main():
     parser.add_argument("--mapping-file", required=True)
     parser.add_argument("--environment", default="/opt/ros/humble/setup.bash")
     args, _ = parser.parse_known_args()
+    if not all(
+        math.isfinite(v) and v > 0
+        for v in (
+            args.feedback_timeout,
+            args.policy_worker_timeout,
+            args.policy_startup_timeout,
+        )
+    ):
+        parser.error("Policy timeouts must be positive and finite")
     if (
         args.host.startswith("-")
         or args.user.startswith("-")
@@ -66,20 +86,42 @@ def main():
     ):
         raise ValueError("Invalid SSH destination")
     quote = shlex.quote
-    command = " && ".join(
-        [
-            "source " + quote(args.environment),
-            "source " + quote(args.workspace.rstrip("/") + "/install/setup.bash"),
-            "exec ros2 launch catbot_policy catbot.launch.py backend:=simulation "
-            + " ".join(
-                quote(key + ":=" + value)
-                for key, value in (
-                    ("policy_bundle", args.policy_bundle),
-                    ("mapping_file", args.mapping_file),
-                )
-            ),
-        ]
+    setup = [
+        "source " + quote(args.environment),
+        "source " + quote(args.workspace.rstrip("/") + "/install/setup.bash"),
+    ]
+    commands = []
+    if args.role in ("both", "foundation"):
+        # Preserve the foundation package's existing module-relative import layout.
+        locate = "from importlib.util import find_spec; from pathlib import Path; print(Path(find_spec('foundation').origin).parent)"
+        setup.append(
+            'export PYTHONPATH="$(python3 -c ' + quote(locate) + '):${PYTHONPATH:-}"'
+        )
+        commands.append(shlex.join(["ros2", "run", "foundation", "main"]))
+    if args.role in ("both", "policy"):
+        policy_parameters = {
+            "policy_bundle": args.policy_bundle,
+            "mapping_file": args.mapping_file,
+            "simulation_mode": True,
+            "feedback_timeout": args.feedback_timeout,
+            "policy_python": args.policy_python,
+            "policy_worker_project": args.policy_worker_project,
+            "policy_uv_executable": args.policy_uv_executable,
+            "policy_worker_timeout": args.policy_worker_timeout,
+            "policy_startup_timeout": args.policy_startup_timeout,
+        }
+        invocation = [args.policy_ros_python, "-m", "catbot_policy.node", "--ros-args"]
+        for name, value in policy_parameters.items():
+            invocation += ["-p", name + ":=" + json.dumps(value)]
+        invocation += ["-r", "/simulation/contract:=/policy/contract"]
+        commands.append(shlex.join(invocation))
+    # Exit as soon as either node stops; the outer supervisor owns their process group.
+    stack = (
+        "exec " + commands[0]
+        if len(commands) == 1
+        else "{ " + " & ".join(commands) + " & wait -n; }"
     )
+    command = " && ".join([*setup, stack])
     remote_command = shlex.join(
         ["python3", "-u", "-c", REMOTE, json.dumps({"command": command})]
     )
@@ -103,15 +145,18 @@ def main():
         ],
         stdin=subprocess.PIPE,
     )
+    stdin = child.stdin
+    if stdin is None:
+        raise RuntimeError("SSH lease pipe was not created")
     try:
         while child.poll() is None and not stop.wait(1):
-            child.stdin.write(b"lease\n")
-            child.stdin.flush()
+            stdin.write(b"lease\n")
+            stdin.flush()
     except BrokenPipeError:
         pass
     finally:
         try:
-            child.stdin.close()
+            stdin.close()
         except BrokenPipeError:
             pass
         try:

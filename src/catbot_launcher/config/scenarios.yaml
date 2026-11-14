@@ -1,0 +1,50 @@
+# Shared defaults for all four scenario launch files; each key is also a CLI argument.
+workspace: /home/catbot/ROS/ros2_ws
+remote_host: 192.168.0.3
+remote_user: catbot
+remote_workspace: /home/catbot/Catbot
+remote_environment: /opt/ros/humble/setup.bash
+remote_policy_bundle: /home/catbot/.local/share/catbot/policies/latest
+remote_mapping_file: /home/catbot/Catbot/src/catbot_policy/catbot_policy/default_mapping.json
+policy_bundle: /home/catbot/.local/share/catbot/policies/latest
+mapping_file: '{workspace}/default_mapping.json'
+rollout_repository: '{workspace}/external/catbot_sim_rollout'
+run_directory: /home/catbot/.local/share/catbot/run
+uv_executable: uv
+device: cpu
+command_timeout: 0.25
+worker_timeout: 2.0
+feedback_timeout: 0.25
+visualization_rate: 30.0
+startup_timeout: 120.0
+sensor_timeout: 0.25
+sensor_max_skew: 0.1
+ground_height_offset: 0.35
+contact_height: 0.02
+estimate_contacts: true
+body_from_camera_wxyz: [1.0, 0.0, 0.0, 0.0]
+body_from_imu_wxyz: [1.0, 0.0, 0.0, 0.0]
+body_to_camera_xyz: [0.0, 0.0, 0.0]
+imu_includes_gravity: true
+camera_model: zed2i
+camera_name: zed
+serial_number: '0'
+imu_topic: '/{camera_name}/zed_node/imu/data'
+odom_topic: '/{camera_name}/zed_node/odom'
+contact_topic: /body/state/foot_contacts
+enable_foxglove: true
+foxglove_address: 0.0.0.0
+foxglove_port: 8765
+
+policy_python: '3.14'
+remote_policy_python: '3.14'
+
+# ROS adapters keep the ROS-compatible interpreter; these are separate from inference.
+policy_ros_python: /usr/bin/python3
+remote_policy_ros_python: /usr/bin/python3
+policy_worker_project: '{workspace}/external/Catbot/src/catbot_policy/catbot_policy/inference'
+remote_policy_worker_project: /home/catbot/Catbot/src/catbot_policy/catbot_policy/inference
+policy_uv_executable: uv
+remote_policy_uv_executable: uv
+policy_worker_timeout: 2.0
+policy_startup_timeout: 120.0
