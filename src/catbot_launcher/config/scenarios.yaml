@@ -2,7 +2,7 @@
 workspace: /home/catbot/projects/ros2_ws
 remote_host: 192.168.0.3
 remote_user: catbot
-remote_workspace: /home/catbot/Catbot  # Pi path still needs confirmation
+remote_workspace: /home/catbot/main
 remote_environment: /opt/ros/humble/setup.bash
 remote_policy_bundle: '{remote_workspace}/src/catbot_policy/artifacts/selected/bundle'
 remote_mapping_file: '{remote_workspace}/src/catbot_policy/catbot_policy/default_mapping.json'
@@ -16,7 +16,8 @@ orin_device: cuda:0
 device: '{orin_device}'
 policy_device: '{orin_device}'
 remote_policy_device: cpu
-# CUDA environments must be prepared with JetPack-compatible dependencies first.
+# Orin: JetPack 6.2.3+b81 / L4T 36.5.2-20260716114719 (reported target versions).
+# CUDA environments still need compatible Python/PyTorch builds; see docs/SIMULATION.md.
 worker_environment: auto
 worker_sync: auto
 policy_worker_environment: auto

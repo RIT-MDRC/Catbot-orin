@@ -43,9 +43,11 @@ Confirmed target setup: Orin workspace `/home/catbot/projects/ros2_ws`, Pi
 `catbot@192.168.0.3` (alternatively `catbot-pi.local`), passwordless SSH, Ubuntu
 22.04 on both machines, uv available, DDS already configured without an extra
 setup script, and NTP active. `/opt/ros/humble/setup.bash` and `/usr/bin/python3`
-remain the expected ROS defaults. The Pi workspace path remains unconfirmed;
-`remote_workspace` currently retains `/home/catbot/Catbot`. Set it once and the
-remote model/mapping/inference paths follow it automatically.
+remain the expected ROS defaults. The confirmed Pi workspace is
+`/home/catbot/main`; remote model, mapping and inference paths follow it
+automatically. The Orin reports `nvidia-jetpack 6.2.3+b81` and
+`nvidia-l4t-core 36.5.2-20260716114719`. These are reported target versions,
+not measurements from the development machine.
 
 The launch uses only locally selected artifacts. It never picks a W&B project,
 queries W&B, or automatically changes the run at startup. Download a fixed run
@@ -96,7 +98,7 @@ ros2 launch catbot_launcher physical_orin.launch.py \
   workspace:=/home/robot/catbot-orin \
   policy_python:=3.14 \
   policy_ros_python:=/usr/bin/python3 \
-  remote_user:=catbot remote_workspace:=/home/catbot/Catbot \
+  remote_user:=catbot remote_workspace:=/home/catbot/main \
   body_to_camera_xyz:='[0.1, 0.0, 0.05]' ground_height_offset:=0.35
 ```
 
@@ -148,12 +150,26 @@ For mixed placement, override `device` and `policy_device` independently. The
 selected policy device is included in `/policy/metrics`. CUDA actor timing is
 synchronized so kernel launch time alone is not mistaken for execution time.
 
-**CUDA package compatibility still requires the Orin's JetPack version.**
+**Known target: JetPack 6.2.3 / L4T 36.5.2. CUDA worker compatibility remains unverified.**
+[NVIDIA's JetPack 6.2.3 documentation](https://developer.nvidia.com/embedded/jetpack-sdk-623)
+lists CUDA 12.6.10, cuDNN 9.3 and Ubuntu 22.04. An installed compute stack may
+have been upgraded independently, so these packaged versions are not a live
+inventory of the Orin's CUDA libraries.
+
 The shipped inference lock explicitly installs CPU PyTorch; it cannot enable
-Jetson CUDA. NVIDIA builds must match JetPack, Python 3.14, and the bundle's exact
-PyTorch version. A prerelease or different version remains rejected. See
-[NVIDIA's Jetson installation guidance](https://docs.nvidia.com/deeplearning/frameworks/install-pytorch-jetson-platform/index.html).
-A configured CUDA default is not evidence that a compatible binary is installed.
+Jetson CUDA. NVIDIA's [published PyTorch compatibility matrix](https://docs.nvidia.com/deeplearning/frameworks/install-pytorch-jetson-platform-release-notes/pytorch-jetson-rel.html)
+lists PyTorch 2.7/2.8 prereleases for JetPack 6.2, while its listed 2.14 prereleases
+target JetPack 7.1. It does not establish a supported Python 3.14 / stable PyTorch
+2.14.0 GPU environment for this JetPack 6.2.3 target. Do not install a desktop or
+SBSA ARM wheel assuming that ARM architecture alone makes it Jetson-compatible.
+
+A CUDA build still must match JetPack, Python 3.14 and the exported bundle's exact
+PyTorch version. A prerelease or different version remains rejected. A custom
+compatible build or a separately validated inference/export version change is
+needed before the CUDA default can be considered ready. Existing CUDA settings
+remain configurable, and `orin_device:=cpu` is available for initial simulation
+verification. No GPU wheel was selected or installed based solely on the reported
+JetPack version.
 
 With CUDA selected, `worker_environment: auto` and
 `policy_worker_environment: auto` select `.venv-cuda` beside each worker's
