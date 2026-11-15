@@ -7,9 +7,12 @@ from typing import Any
 
 import yaml
 from ament_index_python.packages import get_package_share_directory
+from catbot_policy.configuration import POLICY_PARAMETERS
+from catbot_policy.worker_launch import WorkerLaunchSpec
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    ExecuteProcess,
     IncludeLaunchDescription,
     OpaqueFunction,
     Shutdown,
@@ -92,17 +95,7 @@ class ExpandedSettings(dict):
         return value
 
 
-def worker_environment_options(device, project, environment, sync):
-    cuda = str(device).startswith("cuda")
-    if environment == "auto":
-        environment = str(Path(project) / ".venv-cuda") if cuda else ""
-    if sync == "auto":
-        sync = not cuda
-    elif isinstance(sync, str) and sync.lower() in ("true", "false"):
-        sync = sync.lower() == "true"
-    elif not isinstance(sync, bool):
-        raise ValueError("Worker sync options must be auto, true or false")
-    return environment, sync
+worker_environment_options = WorkerLaunchSpec.resolve
 
 
 def build_launch(default_scenario="physical_pi"):
@@ -206,22 +199,18 @@ def build_launch(default_scenario="physical_pi"):
                     on_exit=Shutdown(),
                     parameters=[
                         {
-                            "policy_bundle": values["policy_bundle"],
-                            "policy_device": values["policy_device"],
-                            "policy_worker_environment": values[
-                                "policy_worker_environment"
-                            ],
-                            "policy_worker_sync": values["policy_worker_sync"],
-                            "mapping_file": values["mapping_file"],
+                            **{
+                                key: values[key]
+                                for key in POLICY_PARAMETERS
+                                if key != "simulation_mode"
+                            },
                             "simulation_mode": True,
                             "policy_python": ParameterValue(
                                 values["policy_python"], value_type=str
                             ),
-                            "policy_worker_project": values["policy_worker_project"],
-                            "policy_uv_executable": values["policy_uv_executable"],
-                            "policy_worker_timeout": values["policy_worker_timeout"],
-                            "policy_startup_timeout": values["policy_startup_timeout"],
-                            "feedback_timeout": values["feedback_timeout"],
+                            "policy_worker_environment": ParameterValue(
+                                values["policy_worker_environment"], value_type=str
+                            ),
                         }
                     ],
                     remappings=[("/simulation/contract", "/policy/contract")],
@@ -229,32 +218,30 @@ def build_launch(default_scenario="physical_pi"):
             )
         if remote_role is not None:
             actions.append(
-                Node(
-                    package="catbot_sim",
-                    executable="remote",
+                ExecuteProcess(
                     output="screen",
                     on_exit=Shutdown(),
-                    arguments=[
-                        "--policy-device",
-                        values["remote_policy_device"],
-                        "--policy-worker-environment",
-                        values["remote_policy_worker_environment"],
-                        "--policy-worker-sync",
-                        str(values["remote_policy_worker_sync"]).lower(),
+                    cmd=[
+                        "ros2",
+                        "run",
+                        "catbot_sim",
+                        "remote",
+                        *[
+                            argument
+                            for name in POLICY_PARAMETERS
+                            if name != "simulation_mode"
+                            for value in [
+                                values.get("remote_" + name, values.get(name))
+                            ]
+                            for argument in (
+                                "--" + name.replace("_", "-"),
+                                str(value).lower()
+                                if isinstance(value, bool)
+                                else str(value),
+                            )
+                        ],
                         "--policy-ros-python",
                         values["remote_policy_ros_python"],
-                        "--policy-worker-project",
-                        values["remote_policy_worker_project"],
-                        "--policy-uv-executable",
-                        values["remote_policy_uv_executable"],
-                        "--policy-worker-timeout",
-                        str(values["policy_worker_timeout"]),
-                        "--policy-startup-timeout",
-                        str(values["policy_startup_timeout"]),
-                        "--policy-python",
-                        values["remote_policy_python"],
-                        "--feedback-timeout",
-                        str(values["feedback_timeout"]),
                         "--role",
                         remote_role,
                         "--host",
@@ -265,10 +252,6 @@ def build_launch(default_scenario="physical_pi"):
                         values["remote_workspace"],
                         "--environment",
                         values["remote_environment"],
-                        "--policy-bundle",
-                        values["remote_policy_bundle"],
-                        "--mapping-file",
-                        values["remote_mapping_file"],
                     ],
                 )
             )

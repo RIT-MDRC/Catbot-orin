@@ -8,14 +8,8 @@ import signal
 import subprocess
 import threading
 import time
-from pathlib import Path
 
 import rclpy
-from geometry_msgs.msg import Twist
-from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from std_msgs.msg import Empty, String
-
 from catbot_interfaces.msg import (
     ActuatorKinematicState,
     ActuatorPositionCommand,
@@ -23,6 +17,13 @@ from catbot_interfaces.msg import (
     BodyKinematicState,
     PolicyFeedback,
 )
+from catbot_policy.worker_launch import WorkerLaunchSpec
+from geometry_msgs.msg import Twist
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from std_msgs.msg import Empty, String
+
+from catbot_sim.config import BridgeConfig
 from catbot_sim.physical import PhysicalInputs
 from catbot_sim.visualization import ScenePublisher
 
@@ -34,57 +35,32 @@ class Bridge(Node):
         def param(name, default):
             return self.declare_parameter(name, default).value
 
-        self.backend = str(param("backend", "simulation"))
-        if self.backend not in ("simulation", "hardware"):
-            raise ValueError("backend must be simulation or hardware")
-        repository = Path(str(param("rollout_repository", ""))).expanduser().resolve()
-        if (
-            not (repository / "pyproject.toml").is_file()
-            or not (repository / "src/catbot_rollout/worker.py").is_file()
-        ):
-            raise ValueError(
-                "rollout_repository must point to the initialized "
-                "external/catbot_sim_rollout submodule"
-            )
-        run = Path(str(param("run_directory", ""))).expanduser().resolve()
-        mapping_path = Path(str(param("mapping_file", ""))).expanduser()
-        self.mapping = json.loads(mapping_path.read_text())
+        config = BridgeConfig.from_parameters(param)
+        self.backend = config.backend
+        self.mapping = config.mapping
         self.names = self.mapping["actuator_names"]
-        if (
-            len(self.names) != 12
-            or any(not isinstance(n, str) or not n.strip() for n in self.names)
-            or len(set(self.names)) != 12
-        ):
-            raise ValueError("Expected 12 unique mapping names")
-        for key in ("signs", "offsets_degrees", "minimum_degrees", "maximum_degrees"):
-            values = self.mapping[key]
-            if len(values) != 12 or not all(math.isfinite(v) for v in values):
-                raise ValueError("Invalid mapping " + key)
-        if any(v not in (-1, 1) for v in self.mapping["signs"]):
-            raise ValueError("Mapping signs must be +/-1")
-        if any(
-            lo >= hi
-            for lo, hi in zip(
-                self.mapping["minimum_degrees"],
-                self.mapping["maximum_degrees"],
-                strict=True,
-            )
-        ):
-            raise ValueError("Mapping minimum must be below maximum")
-        self.worker_timeout = float(param("worker_timeout", 2.0))
-        self.visualization_rate = float(param("visualization_rate", 30.0))
-        self.timeout = float(param("command_timeout", 0.25))
-        self.startup_timeout = float(param("startup_timeout", 120.0))
-        if not all(
-            math.isfinite(v) and v > 0
-            for v in (
-                self.timeout,
-                self.startup_timeout,
-                self.worker_timeout,
-                self.visualization_rate,
-            )
-        ):
-            raise ValueError("Timeouts must be positive and finite")
+        self.name_indices = {name: i for i, name in enumerate(self.names)}
+        self.worker_timeout = config.worker_timeout
+        self.visualization_rate = config.visualization_rate
+        self.timeout = config.timeout
+        self.startup_timeout = config.startup_timeout
+        spec = WorkerLaunchSpec.build(
+            config.repository,
+            config.uv,
+            [
+                "-m",
+                "catbot_rollout.worker",
+                "--run-directory",
+                str(config.run),
+                "--visualization-rate",
+                str(config.visualization_rate),
+                "--mode",
+                config.backend,
+            ],
+            device=config.device,
+            environment=config.environment,
+            sync=config.sync,
+        )
         self.command = [0.0] * 3
         self.targets = None
         self.received = None
@@ -142,49 +118,14 @@ class Bridge(Node):
         self.visual_scene = None
         self.visual_poses = None
         self.create_timer(1 / self.visualization_rate, self.publish_visualization)
-        device = str(param("device", "cpu"))
-        environment = str(param("worker_environment", ""))
-        sync = bool(param("worker_sync", True))
-        worker_env = os.environ.copy()
-        for name in (
-            "PYTHONPATH",
-            "PYTHONHOME",
-            "VIRTUAL_ENV",
-            "UV_PROJECT_ENVIRONMENT",
-        ):
-            worker_env.pop(name, None)
-        if environment:
-            selected = Path(environment).expanduser().resolve()
-            if not sync and not (selected / "bin/python").is_file():
-                raise ValueError(
-                    f"Prepare the CUDA simulator environment at {selected}, or use orin_device:=cpu"
-                )
-            worker_env["UV_PROJECT_ENVIRONMENT"] = str(selected)
         self.process = subprocess.Popen(
-            [
-                str(param("uv_executable", "uv")),
-                "run",
-                "--locked" if sync else "--no-sync",
-                "--project",
-                str(repository),
-                "python",
-                "-m",
-                "catbot_rollout.worker",
-                "--run-directory",
-                str(run),
-                "--visualization-rate",
-                str(self.visualization_rate),
-                "--mode",
-                self.backend,
-                "--device",
-                device,
-            ],
+            spec.command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             text=True,
             bufsize=1,
             start_new_session=True,
-            env=worker_env,
+            env=spec.environment,
         )
         self.thread = threading.Thread(target=self.run_worker, daemon=True)
         self.started = time.monotonic()
@@ -207,7 +148,9 @@ class Bridge(Node):
                 return
             targets = list(self.targets) if self.targets is not None else [0.0] * 12
             for name, value in zip(names, values, strict=True):
-                i = self.names.index(name)
+                if name not in self.name_indices:
+                    raise ValueError("Unknown actuator name: " + name)
+                i = self.name_indices[name]
                 if (
                     not math.isfinite(value)
                     or not self.mapping["minimum_degrees"][i]

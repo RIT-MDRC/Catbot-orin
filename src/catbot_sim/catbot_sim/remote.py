@@ -7,48 +7,11 @@ import shlex
 import signal
 import subprocess
 import threading
+from pathlib import Path
 
-REMOTE = r"""
-import json, os, select, signal, subprocess, sys, time
-config = json.loads(sys.argv[1])
-stopping = False
-def stop(*_):
-    global stopping
-    stopping = True
-for sig in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
-    signal.signal(sig, stop)
-child = subprocess.Popen(["bash", "-lc", config["command"]], start_new_session=True, stdin=subprocess.DEVNULL)
-try:
-    deadline = time.monotonic() + 10
-    while child.poll() is None and not stopping:
-        ready, _, _ = select.select([sys.stdin], [], [], 1)
-        if ready:
-            if not os.read(sys.stdin.fileno(), 4096):
-                break
-            deadline = time.monotonic() + 10
-        if time.monotonic() > deadline:
-            break
-finally:
-    try:
-        os.killpg(child.pid, signal.SIGINT)
-        child.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        os.killpg(child.pid, signal.SIGTERM)
-        try:
-            child.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            os.killpg(child.pid, signal.SIGKILL)
-            child.wait()
-    except ProcessLookupError:
-        pass
-    finally:
-        # A reaped launch leader does not prove that every descendant exited.
-        try:
-            os.killpg(child.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-sys.exit(child.returncode or 0)
-"""
+from catbot_policy.configuration import POLICY_PARAMETERS
+
+REMOTE = Path(__file__).with_name("remote_supervisor.py").read_text()
 
 
 def main():
@@ -74,7 +37,7 @@ def main():
     parser.add_argument("--policy-bundle", required=True)
     parser.add_argument("--mapping-file", required=True)
     parser.add_argument("--environment", default="/opt/ros/humble/setup.bash")
-    args, _ = parser.parse_known_args()
+    args = parser.parse_args()
     if not all(
         math.isfinite(v) and v > 0
         for v in (
@@ -105,19 +68,12 @@ def main():
         commands.append(shlex.join(["ros2", "run", "foundation", "main"]))
     if args.role in ("both", "policy"):
         policy_parameters = {
-            "policy_bundle": args.policy_bundle,
-            "policy_device": args.policy_device,
-            "policy_worker_environment": args.policy_worker_environment,
-            "policy_worker_sync": args.policy_worker_sync == "true",
-            "mapping_file": args.mapping_file,
-            "simulation_mode": True,
-            "feedback_timeout": args.feedback_timeout,
-            "policy_python": args.policy_python,
-            "policy_worker_project": args.policy_worker_project,
-            "policy_uv_executable": args.policy_uv_executable,
-            "policy_worker_timeout": args.policy_worker_timeout,
-            "policy_startup_timeout": args.policy_startup_timeout,
+            name: getattr(args, name)
+            for name in POLICY_PARAMETERS
+            if name != "simulation_mode"
         }
+        policy_parameters["simulation_mode"] = True
+        policy_parameters["policy_worker_sync"] = args.policy_worker_sync == "true"
         invocation = [args.policy_ros_python, "-m", "catbot_policy.node", "--ros-args"]
         for name, value in policy_parameters.items():
             invocation += ["-p", name + ":=" + json.dumps(value)]
