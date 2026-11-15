@@ -4,6 +4,7 @@
   <description>Catbot simulation and remote launch adapter</description>
   <maintainer email="hiroto125takeuchi@gmail.com">Catbot</maintainer><license>MIT</license>
   <buildtool_depend>ament_python</buildtool_depend>
+  <exec_depend>catbot_policy</exec_depend>
   <exec_depend>rclpy</exec_depend><exec_depend>catbot_interfaces</exec_depend>
   <exec_depend>geometry_msgs</exec_depend><exec_depend>std_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
