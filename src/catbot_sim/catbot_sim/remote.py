@@ -9,7 +9,7 @@ import subprocess
 import threading
 from pathlib import Path
 
-from catbot_policy.configuration import POLICY_PARAMETERS
+from catbot_policy.configuration import POLICY_DEFAULTS, POLICY_PARAMETERS
 
 REMOTE = Path(__file__).with_name("remote_supervisor.py").read_text()
 
@@ -20,6 +20,16 @@ def main():
         "--role", choices=["both", "foundation", "policy"], default="both"
     )
     parser.add_argument("--policy-device", default="cpu")
+    for name in (
+        "run_id",
+        "checkpoint",
+        "policy_entity",
+        "policy_project",
+        "policy_artifacts_directory",
+    ):
+        parser.add_argument(
+            "--" + name.replace("_", "-"), default=POLICY_DEFAULTS[name]
+        )
     parser.add_argument("--policy-worker-environment", default="auto")
     parser.add_argument(
         "--policy-worker-sync", choices=["auto", "true", "false"], default="auto"

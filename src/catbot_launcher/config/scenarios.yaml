@@ -4,6 +4,12 @@ remote_host: 192.168.0.3
 remote_user: catbot
 remote_workspace: /home/catbot/main
 remote_environment: /opt/ros/humble/setup.bash
+run_id: ''
+checkpoint: ''
+policy_entity: hiromon-rochester-institute-of-technology
+policy_project: catbot
+policy_artifacts_directory: '{workspace}/external/Catbot/src/catbot_policy/artifacts'
+remote_policy_artifacts_directory: '{remote_workspace}/src/catbot_policy/artifacts'
 remote_policy_bundle: '{remote_workspace}/src/catbot_policy/artifacts/selected/bundle'
 remote_mapping_file: '{remote_workspace}/src/catbot_policy/catbot_policy/default_mapping.json'
 policy_bundle: '{workspace}/external/Catbot/src/catbot_policy/artifacts/selected/bundle'

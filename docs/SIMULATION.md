@@ -109,6 +109,49 @@ Other common overrides: `enable_camera:=false`, `enable_foxglove:=false`,
 `worker_timeout`, `startup_timeout`, `feedback_timeout`, `sensor_timeout` and
 `sensor_max_skew`. Use a single Foxglove listener on the chosen port.
 
+
+### Select policies by run ID
+
+The default W&B project is `hiromon-rochester-institute-of-technology/catbot`.
+From the Orin workspace, download a run's latest checkpoint, or a specific number:
+
+```bash
+uv run src/catbot_policy/pull_policy.py ow4nsasy
+uv run src/catbot_policy/pull_policy.py ow4nsasy 19999
+# Named alternatives:
+uv run src/catbot_policy/pull_policy.py --run-id ow4nsasy --checkpoint 19999
+```
+
+Omitting the checkpoint downloads the highest numbered `model_N.pt` **in that
+specific W&B run**. Full `ENTITY/PROJECT/RUN_ID` and `model_N.pt` inputs still
+work; `--entity` / `--project` or `WANDB_ENTITY` / `WANDB_PROJECT` override the
+downloader defaults. Download/export selects the result for subsequent default
+launches. Failed preparation preserves the previous selected link.
+
+Launch without arguments to keep the selected local download. To select from the
+local cache without downloading or changing the saved selection:
+
+```bash
+ros2 launch catbot_launcher simulation_orin.launch.py run_id:=ow4nsasy
+ros2 launch catbot_launcher simulation_orin.launch.py run_id:=ow4nsasy checkpoint:=19999
+```
+
+`run_id` alone chooses the highest **downloaded** checkpoint of that run, not a
+newer checkpoint from W&B. `checkpoint` is optional, uses ROS syntax `:=`, and
+requires `run_id`. Missing/invalid selections list downloaded run IDs, checkpoint
+numbers and paths. Multiple exports of the same run/checkpoint are treated as
+ambiguous; select explicit paths in that case. Restart the launch to switch.
+
+These arguments apply to all four Orin scenarios and Catbot's standalone launch.
+The helper selects both simulator model/config and policy bundle together. Pi
+policy scenarios pass the exact resolved run/checkpoint to the Pi; that same
+checkpoint must already be downloaded on both hosts. The Pi resolves its own
+local paths and lists its own cache on selection failure. Custom local cache
+roots use `policy_artifacts_directory` / `remote_policy_artifacts_directory`;
+`policy_entity` and `policy_project` override the launch's default project.
+Existing explicit `run_directory` / `policy_bundle` paths remain supported when
+`run_id` and `checkpoint` are omitted. CUDA/CPU environment selection is unchanged.
+
 ## One policy implementation on either machine
 
 Orin's `src/catbot_policy/catbot_policy` is a symlink to the pinned
