@@ -14,3 +14,10 @@ __pycache__/
 .idea/
 *~
 .DS_Store
+
+# Test reports and property-test cache
+.hypothesis/
+.pytest_cache/
+.coverage*
+*-coverage.json
+*-tests.xml

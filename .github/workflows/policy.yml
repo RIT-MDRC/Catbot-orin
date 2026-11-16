@@ -1,0 +1,70 @@
+name: Policy CI
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  unit:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize shared Catbot contract
+        run: |
+          git -c safe.directory="$GITHUB_WORKSPACE" -c url.https://github.com/.insteadOf=git@github.com: submodule update --init external/Catbot
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: '**/tests/uv.lock'
+      - name: Existing foundation and UI tests
+        working-directory: external/Catbot
+        run: uv run --locked --group dev python -m pytest src/foundation/test/test_actuator.py src/foundation/test/test_body_control.py src/foundation/test/test_body_state.py src/foundation/test/test_odrive_position.py src/ui/test/test_policy_commands.py --junitxml=foundation-tests.xml
+      - name: Catbot policy suite and coverage floors
+        working-directory: external/Catbot/
+        run: |
+          uv run --locked --project tests python -m pytest -m 'not ros' --cov=catbot_policy.runtime --cov=catbot_policy.deployment --cov-report=term-missing --cov-report=json:policy-coverage.json --junitxml=policy-tests.xml
+          uv run --locked --project tests python tests/check_coverage.py policy-coverage.json catbot_policy/runtime.py=92 catbot_policy/deployment.py=90
+      - name: Orin pure functions and bridge supervision
+        run: |
+          uv run --locked --project external/Catbot/tests python -m pytest -m 'not ros' --cov=catbot_launcher.scenarios --cov-report=term-missing --cov-report=json:orin-coverage.json --junitxml=orin-tests.xml
+          uv run --locked --project external/Catbot/tests python external/Catbot/tests/check_coverage.py orin-coverage.json catbot_launcher/scenarios.py=51
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-reports
+          path: |
+            **/*-coverage.json
+            **/*-tests.xml
+  ros:
+    runs-on: ubuntu-22.04
+    container: ros:humble-ros-base-jammy
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize shared Catbot contract
+        run: |
+          git -c safe.directory="$GITHUB_WORKSPACE" -c url.https://github.com/.insteadOf=git@github.com: submodule update --init external/Catbot
+      - name: Install ROS test tools
+        run: |
+          apt-get update
+          apt-get install -y python3-pip python3-colcon-common-extensions ros-humble-geometry-msgs ros-humble-tf2-ros ros-humble-visualization-msgs
+          python3 -m pip install pytest==8.4.2
+      - name: Build adapters and generated interfaces
+        shell: bash
+        run: |
+          source /opt/ros/humble/setup.bash
+          colcon build --base-paths external/Catbot/src/catbot_interfaces external/Catbot/src/catbot_policy src/catbot_sim src/catbot_launcher --cmake-args -DBUILD_TESTING=OFF
+      - name: ROS integration tests (required, no import skips)
+        shell: bash
+        env:
+          ROS_DOMAIN_ID: '71'
+          ROS_LOCALHOST_ONLY: '1'
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: |
+          source /opt/ros/humble/setup.bash
+          source install/setup.bash
+          python3 -m pytest -m ros tests/test_ros_scenario.py --junitxml=ros-tests.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ros-reports
+          path: ros-tests.xml

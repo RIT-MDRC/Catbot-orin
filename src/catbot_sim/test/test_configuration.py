@@ -110,6 +110,7 @@ class ConfigurationTests(unittest.TestCase):
             patch.object(
                 remote_supervisor.select, "select", return_value=([sys.stdin], [], [])
             ),
+            patch.object(sys.stdin, "fileno", return_value=0),
             patch.object(remote_supervisor.os, "read", return_value=b""),
             patch.object(remote_supervisor.os, "killpg") as kill,
         ):
