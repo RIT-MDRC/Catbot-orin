@@ -10,7 +10,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Initialize shared Catbot contract
         run: |
-          git -c url.https://github.com/.insteadOf=git@github.com: submodule update --init external/Catbot
+          git -c safe.directory="$GITHUB_WORKSPACE" -c url.https://github.com/.insteadOf=git@github.com: submodule update --init external/Catbot
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Initialize shared Catbot contract
         run: |
-          git -c url.https://github.com/.insteadOf=git@github.com: submodule update --init external/Catbot
+          git -c safe.directory="$GITHUB_WORKSPACE" -c url.https://github.com/.insteadOf=git@github.com: submodule update --init external/Catbot
       - name: Install ROS test tools
         run: |
           apt-get update
