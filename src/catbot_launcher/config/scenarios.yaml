@@ -11,9 +11,10 @@ mapping_file: '{workspace}/default_mapping.json'
 rollout_repository: '{workspace}/external/catbot_sim_rollout'
 run_directory: '{workspace}/external/Catbot/src/catbot_policy/artifacts/selected'
 uv_executable: uv
-# One override selects CPU for both Orin simulation/kinematics and Orin policy.
+# Policy defaults to CUDA; orin_device:=cpu selects the modern CPU policy.
 orin_device: cuda:0
-device: '{orin_device}'
+# Simulation/kinematics still require the modern training stack, separate from policy.
+device: cpu
 policy_device: '{orin_device}'
 remote_policy_device: cpu
 # Orin: JetPack 6.2.3+b81 / L4T 36.5.2-20260716114719 (reported target versions).
@@ -24,6 +25,8 @@ policy_worker_environment: auto
 policy_worker_sync: auto
 remote_policy_worker_environment: auto
 remote_policy_worker_sync: auto
+policy_torch_compatibility: auto
+remote_policy_torch_compatibility: auto
 command_timeout: 0.25
 worker_timeout: 2.0
 feedback_timeout: 0.25
@@ -48,8 +51,9 @@ enable_foxglove: true
 foxglove_address: 0.0.0.0
 foxglove_port: 8765
 
-policy_python: '3.14'
-remote_policy_python: '3.14'
+# auto selects Python 3.10 for CUDA policy and 3.14 for CPU policy.
+policy_python: auto
+remote_policy_python: auto
 
 # ROS adapters keep the ROS-compatible interpreter; these are separate from inference.
 policy_ros_python: /usr/bin/python3

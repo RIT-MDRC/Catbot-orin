@@ -154,6 +154,9 @@ def build_launch(default_scenario="physical_pi"):
             values[environment], values[sync] = worker_environment_options(
                 values[device], values[project], values[environment], values[sync]
             )
+            if sync != "worker_sync":
+                # Policy nodes accept auto/true/false strings in every launch path.
+                values[sync] = str(values[sync]).lower()
         camera = values["enable_camera"]
         if isinstance(camera, bool):
             pass
@@ -210,6 +213,9 @@ def build_launch(default_scenario="physical_pi"):
                             ),
                             "policy_worker_environment": ParameterValue(
                                 values["policy_worker_environment"], value_type=str
+                            ),
+                            "policy_worker_sync": ParameterValue(
+                                values["policy_worker_sync"], value_type=str
                             ),
                         }
                     ],

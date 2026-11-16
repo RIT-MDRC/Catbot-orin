@@ -12,6 +12,7 @@ setup(
             "inference/*.toml",
             "inference/*.lock",
             "inference/*.py",
+            "inference/cuda/*.toml",
         ]
     },
     data_files=[

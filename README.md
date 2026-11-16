@@ -69,9 +69,11 @@ Simulation uses the same position-control and joint-state topics as foundation.
 See [the scenario guide](docs/SIMULATION.md) for shared defaults, deployment,
 calibration, sensor estimates and the static-only verification boundary.
 
-Configured Orin workspace: `/home/catbot/projects/ros2_ws`. Orin computation defaults
-to CUDA (`orin_device:=cuda:0`), with `orin_device:=cpu` available for the locked CPU
-environments. CUDA needs a compatible JetPack/Python/PyTorch environment first.
+Configured Orin workspace: `/home/catbot/projects/ros2_ws`. Orin policy defaults to
+CUDA with Python 3.10 and a separately prepared Jetson Torch environment.
+`orin_device:=cpu` selects Python 3.14 and the locked CPU environment.
+Simulation/kinematics retain their modern Python stack and default to CPU.
+See the scenario guide for the environment setup script and CUDA prerequisites.
 Download a fixed run with `uv run src/catbot_policy/pull_policy.py ENTITY/PROJECT/RUN_ID model_N.pt`;
 launches use that module's selected local artifacts. Camera settings are unchanged.
 
