@@ -1,5 +1,6 @@
 """Single source of launch defaults, placement and topic wiring."""
 
+import json
 import math
 import os
 import shlex
@@ -7,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from catbot_policy.artifacts import available_models, resolve_downloaded
 from catbot_policy.configuration import POLICY_PARAMETERS
 from catbot_policy.worker_launch import WorkerLaunchSpec
 
@@ -140,6 +142,25 @@ def build_launch(default_scenario="physical_pi"):
         for key, original in defaults.items():
             value = expanded[key]
             values[key] = decode_setting(original, value)
+        if values["run_id"] or values["checkpoint"]:
+            selected = resolve_downloaded(
+                values["policy_artifacts_directory"],
+                values["run_id"],
+                values["checkpoint"],
+                entity=values["policy_entity"],
+                project=values["policy_project"],
+            )
+            values["run_directory"] = str(selected)
+            values["policy_bundle"] = str(selected / "bundle")
+            # Pin the same checkpoint on the Pi, even if it has newer local downloads.
+            source = json.loads((selected / "bundle/source.json").read_text())
+            values["run_id"] = source["run"]
+            values["checkpoint"] = source["checkpoint"]
+        if not (Path(values["run_directory"]).expanduser() / "config.json").is_file():
+            raise ValueError(
+                f"Missing downloaded run: {values['run_directory']}\n"
+                + available_models(values["policy_artifacts_directory"])
+            )
         for key in (
             "policy_bundle",
             "mapping_file",
@@ -166,6 +187,9 @@ def build_launch(default_scenario="physical_pi"):
             values[environment], values[sync] = worker_environment_options(
                 values[device], values[project], values[environment], values[sync]
             )
+            if sync != "worker_sync":
+                # Policy nodes accept auto/true/false strings in every launch path.
+                values[sync] = str(values[sync]).lower()
         camera = values["enable_camera"]
         if isinstance(camera, bool):
             pass
@@ -222,6 +246,9 @@ def build_launch(default_scenario="physical_pi"):
                             ),
                             "policy_worker_environment": ParameterValue(
                                 values["policy_worker_environment"], value_type=str
+                            ),
+                            "policy_worker_sync": ParameterValue(
+                                values["policy_worker_sync"], value_type=str
                             ),
                         }
                     ],

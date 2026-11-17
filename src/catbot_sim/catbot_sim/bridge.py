@@ -8,6 +8,12 @@ import threading
 import time
 
 import rclpy
+from catbot_policy.worker_launch import WorkerLaunchSpec
+from geometry_msgs.msg import Twist
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from std_msgs.msg import Empty, String
+
 from catbot_interfaces.msg import (
     ActuatorKinematicState,
     ActuatorPositionCommand,
@@ -15,12 +21,6 @@ from catbot_interfaces.msg import (
     BodyKinematicState,
     PolicyFeedback,
 )
-from catbot_policy.worker_launch import WorkerLaunchSpec
-from geometry_msgs.msg import Twist
-from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from std_msgs.msg import Empty, String
-
 from catbot_sim.config import BridgeConfig
 from catbot_sim.mapping import apply_positions
 from catbot_sim.physical import PhysicalInputs

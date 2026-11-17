@@ -16,6 +16,11 @@ setup(
         (os.path.join("share", package_name, "config"), glob("config/*.yaml")),
     ],
     install_requires=["setuptools", "PyYAML"],
+    entry_points={
+        "console_scripts": [
+            "zed_watchdog = catbot_launcher.zed_watchdog:main",
+        ]
+    },
     zip_safe=True,
     maintainer="ROS User",
     maintainer_email="user@example.com",

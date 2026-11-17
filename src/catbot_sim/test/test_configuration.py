@@ -9,8 +9,9 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from catbot_sim import remote, remote_supervisor
 from catbot_sim.config import BridgeConfig
+
+from catbot_sim import remote, remote_supervisor
 
 
 class ConfigurationTests(unittest.TestCase):

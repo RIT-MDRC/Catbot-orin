@@ -87,7 +87,8 @@ Defaults derive from the workspace paths:
   their workspace paths. Templates support references to other defaults, with
   unknown keys and cycles rejected.
 - `remote_environment`: `/opt/ros/humble/setup.bash`; DDS is inherited unchanged.
-- `policy_python` / `remote_policy_python`: `3.14` selected by uv.
+- `policy_python` / `remote_policy_python`: `auto` selects 3.10 for CUDA and
+  3.14 for CPU; a version or interpreter path overrides this selection.
 - `policy_ros_python` / `remote_policy_ros_python`: `/usr/bin/python3`, used only
   for ROS adapters and required to match the installed ROS ABI.
 
@@ -96,7 +97,7 @@ Example:
 ```bash
 ros2 launch catbot_launcher physical_orin.launch.py \
   workspace:=/home/robot/catbot-orin \
-  policy_python:=3.14 \
+  policy_python:=auto \
   policy_ros_python:=/usr/bin/python3 \
   remote_user:=catbot remote_workspace:=/home/catbot/main \
   body_to_camera_xyz:='[0.1, 0.0, 0.05]' ground_height_offset:=0.35
@@ -107,6 +108,49 @@ Other common overrides: `enable_camera:=false`, `enable_foxglove:=false`,
 `foxglove_port`, `device`, `uv_executable`, `visualization_rate`, `command_timeout`,
 `worker_timeout`, `startup_timeout`, `feedback_timeout`, `sensor_timeout` and
 `sensor_max_skew`. Use a single Foxglove listener on the chosen port.
+
+
+### Select policies by run ID
+
+The default W&B project is `hiromon-rochester-institute-of-technology/catbot`.
+From the Orin workspace, download a run's latest checkpoint, or a specific number:
+
+```bash
+uv run src/catbot_policy/pull_policy.py ow4nsasy
+uv run src/catbot_policy/pull_policy.py ow4nsasy 19999
+# Named alternatives:
+uv run src/catbot_policy/pull_policy.py --run-id ow4nsasy --checkpoint 19999
+```
+
+Omitting the checkpoint downloads the highest numbered `model_N.pt` **in that
+specific W&B run**. Full `ENTITY/PROJECT/RUN_ID` and `model_N.pt` inputs still
+work; `--entity` / `--project` or `WANDB_ENTITY` / `WANDB_PROJECT` override the
+downloader defaults. Download/export selects the result for subsequent default
+launches. Failed preparation preserves the previous selected link.
+
+Launch without arguments to keep the selected local download. To select from the
+local cache without downloading or changing the saved selection:
+
+```bash
+ros2 launch catbot_launcher simulation_orin.launch.py run_id:=ow4nsasy
+ros2 launch catbot_launcher simulation_orin.launch.py run_id:=ow4nsasy checkpoint:=19999
+```
+
+`run_id` alone chooses the highest **downloaded** checkpoint of that run, not a
+newer checkpoint from W&B. `checkpoint` is optional, uses ROS syntax `:=`, and
+requires `run_id`. Missing/invalid selections list downloaded run IDs, checkpoint
+numbers and paths. Multiple exports of the same run/checkpoint are treated as
+ambiguous; select explicit paths in that case. Restart the launch to switch.
+
+These arguments apply to all four Orin scenarios and Catbot's standalone launch.
+The helper selects both simulator model/config and policy bundle together. Pi
+policy scenarios pass the exact resolved run/checkpoint to the Pi; that same
+checkpoint must already be downloaded on both hosts. The Pi resolves its own
+local paths and lists its own cache on selection failure. Custom local cache
+roots use `policy_artifacts_directory` / `remote_policy_artifacts_directory`;
+`policy_entity` and `policy_project` override the launch's default project.
+Existing explicit `run_directory` / `policy_bundle` paths remain supported when
+`run_id` and `checkpoint` are omitted. CUDA/CPU environment selection is unchanged.
 
 ## One policy implementation on either machine
 
@@ -130,73 +174,101 @@ Install the ROS package dependencies, including `nav_msgs`, `sensor_msgs`,
 `tf2_ros`, `visualization_msgs`, and Python YAML. The ROS adapter requires no
 PyTorch installation. Its interpreter must match ROS Humble's Python ABI and see
 the sourced ROS/workspace `PYTHONPATH`. A system-site-packages virtual environment
-based on `/usr/bin/python3` is also suitable. The inference worker remains separate
-on Python 3.14, with the exact PyTorch version required by the downloaded bundle.
+based on `/usr/bin/python3` is also suitable. The inference worker uses a separate CPU or CUDA environment as described below.
 Deploy the same Catbot `Dev` revision pinned by Orin's submodule to the Pi and
 build/source its updated packages for scenarios 1–3. Scenario 4 never invokes SSH.
 
 ## Orin CUDA and Pi CPU
 
-`orin_device` defaults to `cuda:0` and supplies both simulation/kinematics `device`
-and Orin `policy_device`. Pi `remote_policy_device` defaults to `cpu`. To switch
-all Orin computation to CPU, use a single override with any scenario:
+`orin_device` defaults to `cuda:0` for Orin policy inference. Pi
+`remote_policy_device` defaults to `cpu`. Simulation/kinematics `device` now defaults
+to `cpu`: it retains the Python 3.14 MuJoCo/training dependencies, independent of
+policy inference. Changing the policy interpreter does not port that training
+stack to older Python or JetPack CUDA.
+
+| Policy device | Python with `policy_python:=auto` | Environment | Dependency handling |
+| --- | --- | --- | --- |
+| CUDA | 3.10 | `<inference>/.venv-cuda` | Prepared Jetson Torch; no automatic sync |
+| CPU | 3.14 | `<inference>/.venv` | Locked PyTorch 2.14 CPU environment |
+
+The same selection applies on the Pi through `remote_policy_*` options and in
+Catbot's standalone launch. ROS adapters keep `/usr/bin/python3`. A venv does not
+change system Python or the ROS ABI. No environment activation is necessary for
+launching: uv selects the policy environment explicitly.
+
+On the **Orin**, from `/home/catbot/projects/ros2_ws`, prepare CPU inference:
 
 ```bash
+python3 external/Catbot/src/catbot_policy/catbot_policy/inference/setup_environment.py --device cpu
+```
+
+Prepare CUDA inference using a trusted wheel built for **JetPack 6.2 / CUDA 12.6,
+Python 3.10, Jetson aarch64**, supplying the actual wheel path or URL:
+
+```bash
+python3 external/Catbot/src/catbot_policy/catbot_policy/inference/setup_environment.py \
+  --device cuda --torch-wheel /absolute/path/to/jetson-torch-cp310-linux_aarch64.whl
+```
+
+Alternatively, if CUDA Torch is already installed for the system Python, reuse it
+in a separate venv (a new environment is required for system-site-packages):
+
+```bash
+python3 external/Catbot/src/catbot_policy/catbot_policy/inference/setup_environment.py \
+  --device cuda --python /usr/bin/python3 --system-site-packages
+```
+
+These are alternative CUDA provisioning methods. The script verifies Python/Torch
+versions and CUDA allocation **on the target**; it starts no policy or ROS nodes.
+Use `--python` and `--environment` to customize setup, and matching `policy_python`
+and `policy_worker_environment` launch overrides for custom values. On the Pi,
+the same script lives at `src/catbot_policy/catbot_policy/inference/setup_environment.py`.
+Use `--device cpu` there by default.
+
+[NVIDIA's compatibility matrix](https://docs.nvidia.com/deeplearning/frameworks/install-pytorch-jetson-platform-release-notes/pytorch-jetson-rel.html)
+lists PyTorch 2.7/2.8 prereleases for JetPack 6.2. It does not list a standalone
+wheel for those releases, so this repository does not invent a download URL or
+install a desktop/SBSA ARM wheel as a substitute. The reported target is JetPack
+6.2.3 / L4T 36.5.2; choosing a compatible vendor build and validating it on the
+actual Orin remain necessary. System CUDA libraries and any wheel-specific
+prerequisites must already be installed.
+
+Launch simulation on CPU, policy on Orin CUDA, and Foxglove:
+
+```bash
+ros2 launch catbot_launcher simulation_orin.launch.py
+# Explicit equivalent:
+ros2 launch catbot_launcher simulation_orin.launch.py device:=cpu policy_device:=cuda:0
+# Modern CPU policy instead, with its independent locked venv:
 ros2 launch catbot_launcher simulation_orin.launch.py orin_device:=cpu
-ros2 launch catbot_launcher simulation_pi.launch.py orin_device:=cpu
 ```
 
-For mixed placement, override `device` and `policy_device` independently. The
-selected policy device is included in `/policy/metrics`. CUDA actor timing is
-synchronized so kernel launch time alone is not mistaken for execution time.
+`policy_python:=auto`, `policy_worker_environment:=auto` and
+`policy_worker_sync:=auto` derive defaults from the policy device. CUDA uses a
+separate `inference/cuda` uv project that permits Python >=3.10, with the prepared
+`.venv-cuda` beside the CPU project's `.venv`. CPU dependency resolution remains
+unchanged. CUDA syncing is rejected so it cannot remove vendor packages; missing
+CUDA environments/devices fail explicitly without falling back to CPU. The
+simulator's `worker_environment` / `worker_sync` are independent: explicitly
+selecting `device:=cuda:0` still requires a separately prepared **modern** CUDA
+simulation environment.
 
-**Known target: JetPack 6.2.3 / L4T 36.5.2. CUDA worker compatibility remains unverified.**
-[NVIDIA's JetPack 6.2.3 documentation](https://developer.nvidia.com/embedded/jetpack-sdk-623)
-lists CUDA 12.6.10, cuDNN 9.3 and Ubuntu 22.04. An installed compute stack may
-have been upgraded independently, so these packaged versions are not a live
-inventory of the Orin's CUDA libraries.
+`policy_torch_compatibility:=auto` uses `exact` for CPU and `load` for CUDA.
+`exact` requires the exported Torch version to match. `load` permits a version
+mismatch with a warning, retains bundle checksums and observation/action contract
+validation, and requires TorchScript loading plus a finite `(1, 12)` startup
+output. Loading newer TorchScript on older Torch is not guaranteed; an unsupported
+operator still stops startup. A successful load is not proof of numerical parity
+or learned gait correctness. Validate representative observations against the
+modern CPU reference before physical operation. Set
+`policy_torch_compatibility:=exact` to restore strict matching, or
+`remote_policy_torch_compatibility` for remote inference. Policy downloads/exports
+remain on their own modern/tooling environment; they do not install into CUDA.
 
-The shipped inference lock explicitly installs CPU PyTorch; it cannot enable
-Jetson CUDA. NVIDIA's [published PyTorch compatibility matrix](https://docs.nvidia.com/deeplearning/frameworks/install-pytorch-jetson-platform-release-notes/pytorch-jetson-rel.html)
-lists PyTorch 2.7/2.8 prereleases for JetPack 6.2, while its listed 2.14 prereleases
-target JetPack 7.1. It does not establish a supported Python 3.14 / stable PyTorch
-2.14.0 GPU environment for this JetPack 6.2.3 target. Do not install a desktop or
-SBSA ARM wheel assuming that ARM architecture alone makes it Jetson-compatible.
-
-A CUDA build still must match JetPack, Python 3.14 and the exported bundle's exact
-PyTorch version. A prerelease or different version remains rejected. A custom
-compatible build or a separately validated inference/export version change is
-needed before the CUDA default can be considered ready. Existing CUDA settings
-remain configurable, and `orin_device:=cpu` is available for initial simulation
-verification. No GPU wheel was selected or installed based solely on the reported
-JetPack version.
-
-With CUDA selected, `worker_environment: auto` and
-`policy_worker_environment: auto` select `.venv-cuda` beside each worker's
-`pyproject.toml`. These environments must already contain the compatible GPU
-packages and required dependencies. Their `*_sync: auto` choices disable syncing
-and use `uv run --no-sync` with `UV_PROJECT_ENVIRONMENT` so the CPU lock does not
-replace a prepared NVIDIA build. Both the simulator and inference environments
-need appropriate dependencies. They are distinct projects and virtual environments.
-Override environment paths and sync flags for another prepared environment.
-Missing CUDA interpreters or unavailable CUDA cause an explicit startup failure;
-there is no automatic CPU fallback. Until CUDA compatibility is established,
-`orin_device:=cpu` selects the shipped locked CPU environments instead.
-
-For CPU inference, prepare the environment on whichever host runs the policy:
-
-```bash
-# Orin, from its workspace:
-uv sync --locked --python 3.14 --project external/Catbot/src/catbot_policy/catbot_policy/inference
-# Pi, from its Catbot workspace:
-uv sync --locked --python 3.14 --project src/catbot_policy/catbot_policy/inference
-```
-
-CPU simulation uses the rollout project's normal `uv sync --locked` environment.
-The worker launcher clears inherited ROS Python paths and virtualenv overrides
-before selecting its own environment. `policy_uv_executable` and
-`remote_policy_uv_executable` can override uv's executable path. Worker/startup
-limits remain adjustable through the existing timeout parameters.
+`/policy/metrics` reports the selected device; startup logs report worker Python.
+CUDA timing synchronizes kernel execution. Worker launch removes inherited ROS
+Python paths and virtualenv overrides. CPU/CUDA runtime and policy parity have
+not been tested on the development Mac; verification here is static only.
 
 To report versions without starting ROS nodes, policy, cameras or motors, run
 these commands **on the target machines**, not on the development Mac:

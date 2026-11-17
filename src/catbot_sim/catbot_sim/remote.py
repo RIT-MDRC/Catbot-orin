@@ -9,7 +9,7 @@ import subprocess
 import threading
 from pathlib import Path
 
-from catbot_policy.configuration import POLICY_PARAMETERS
+from catbot_policy.configuration import POLICY_DEFAULTS, POLICY_PARAMETERS
 
 REMOTE = Path(__file__).with_name("remote_supervisor.py").read_text()
 
@@ -20,11 +20,26 @@ def main():
         "--role", choices=["both", "foundation", "policy"], default="both"
     )
     parser.add_argument("--policy-device", default="cpu")
-    parser.add_argument("--policy-worker-environment", default="")
+    for name in (
+        "run_id",
+        "checkpoint",
+        "policy_entity",
+        "policy_project",
+        "policy_artifacts_directory",
+    ):
+        parser.add_argument(
+            "--" + name.replace("_", "-"), default=POLICY_DEFAULTS[name]
+        )
+    parser.add_argument("--policy-worker-environment", default="auto")
     parser.add_argument(
-        "--policy-worker-sync", choices=["true", "false"], default="true"
+        "--policy-worker-sync", choices=["auto", "true", "false"], default="auto"
     )
-    parser.add_argument("--policy-python", default="3.14")
+    parser.add_argument("--policy-python", default="auto")
+    parser.add_argument(
+        "--policy-torch-compatibility",
+        choices=["auto", "exact", "load"],
+        default="auto",
+    )
     parser.add_argument("--policy-ros-python", default="/usr/bin/python3")
     parser.add_argument("--policy-worker-project", required=True)
     parser.add_argument("--policy-uv-executable", default="uv")
@@ -73,7 +88,6 @@ def main():
             if name != "simulation_mode"
         }
         policy_parameters["simulation_mode"] = True
-        policy_parameters["policy_worker_sync"] = args.policy_worker_sync == "true"
         invocation = [args.policy_ros_python, "-m", "catbot_policy.node", "--ros-args"]
         for name, value in policy_parameters.items():
             invocation += ["-p", name + ":=" + json.dumps(value)]

@@ -101,3 +101,52 @@ def test_array_length_cannot_change(values):
 
     with pytest.raises(ValueError):
         decode_setting([0.0] * 4, json.dumps(values))
+
+
+def test_launch_declares_typed_defaults(monkeypatch):
+    """Check declaration assembly; ROS executes the deferred callback in its CI job."""
+    import sys
+    from pathlib import Path
+    from types import ModuleType
+    from unittest.mock import Mock
+
+    from catbot_launcher.scenarios import SCENARIOS, build_launch
+
+    share = Path(__file__).resolve().parents[1] / "src/catbot_launcher"
+    declarations, opaque, description = Mock(), Mock(), Mock()
+    modules = {
+        "ament_index_python.packages": {
+            "get_package_share_directory": Mock(return_value=str(share))
+        },
+        "launch": {"LaunchDescription": description},
+        "launch.actions": {
+            "DeclareLaunchArgument": declarations,
+            "OpaqueFunction": opaque,
+            "ExecuteProcess": Mock(),
+            "IncludeLaunchDescription": Mock(),
+            "Shutdown": Mock(),
+        },
+        "launch.launch_description_sources": {"PythonLaunchDescriptionSource": Mock()},
+        "launch.substitutions": {"LaunchConfiguration": Mock()},
+        "launch_ros.actions": {"Node": Mock()},
+        "launch_ros.parameter_descriptions": {"ParameterValue": Mock()},
+    }
+    for name, members in modules.items():
+        module = ModuleType(name)
+        module.__dict__.update(members)
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.delenv("CATBOT_LAUNCH_DEFAULTS", raising=False)
+    assert build_launch("simulation_orin") is description.return_value
+    assert declarations.call_args_list[0].args == ("scenario",)
+    assert declarations.call_args_list[0].kwargs == {
+        "default_value": "simulation_orin",
+        "choices": list(SCENARIOS),
+    }
+    defaults = {
+        call.args[0]: call.kwargs["default_value"]
+        for call in declarations.call_args_list[1:]
+    }
+    assert defaults["worker_timeout"] == "2.0"
+    assert defaults["enable_foxglove"] == "true"
+    assert decode_setting([0, 0, 0], defaults["body_to_camera_xyz"]) == [0, 0, 0]
+    assert callable(opaque.call_args.kwargs["function"])

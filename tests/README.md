@@ -14,5 +14,17 @@ actuator commands matching the shared fixture. No hardware or model artifacts
 are required. Missing ROS bindings fail this job instead of skipping it.
 
 The single golden file lives in `external/Catbot/tests/fixtures/contract.json`.
-Do not copy it here. The 51% scenarios.py floor measures the pure paths; ROS launch
-assembly is checked separately by the scenario integration test.
+Do not copy it here. CI requires 51% coverage for scenarios.py and 95% separately
+for worker_process.py, mapping.py, config.py, remote.py, remote_supervisor.py, and
+bridge.py. Each module is explicitly included in collection, so an unimported
+module cannot disappear from the report. The shared check_coverage.py reads these
+floors from the workflow arguments; it does not hard-code module names.
+
+Bridge unit tests double the ROS boundaries and exercise initialization, command
+validation, feedback, watchdogs, metrics and worker loops. The separate ROS job
+checks actual message types and launch behavior. Supervisor tests cover lease
+expiry/renewal, disconnect, shutdown signals, escalation and descendant cleanup
+after the launch leader exits. Real local process tests verify workers are reaped
+after lease expiry, disconnect, signal shutdown and SIGKILL escalation, including
+a stubborn descendant surviving its launch leader. SSH and target hardware are
+not required.

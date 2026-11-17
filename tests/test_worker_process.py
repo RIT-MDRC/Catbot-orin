@@ -5,6 +5,8 @@ import sys
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, call
 
 import pytest
 from catbot_sim.worker_process import WorkerProcess
@@ -76,3 +78,28 @@ def test_bridge_roundtrip(worker):
     instance.process.stdin.write('{"type":"ping"}\n')
     instance.process.stdin.flush()
     assert instance.read_worker()["request"] == {"type": "ping"}
+
+
+def test_worker_eof_is_reported():
+    import io
+
+    instance = WorkerProcess()
+    instance.process = SimpleNamespace(stdout=io.StringIO(""))
+    with pytest.raises(RuntimeError, match="exited"):
+        instance.read_worker()
+
+
+def test_worker_vanishes_during_kill_escalation(monkeypatch):
+    instance = WorkerProcess()
+    instance.stopping, instance.thread = Mock(), Mock()
+    instance.process = Mock(pid=123)
+    instance.process.wait.side_effect = [subprocess.TimeoutExpired("worker", 5), 0]
+    kill = Mock(side_effect=[None, ProcessLookupError, ProcessLookupError])
+    monkeypatch.setattr("catbot_sim.worker_process.os.killpg", kill)
+    instance.close()
+    assert kill.call_args_list == [
+        call(123, signal.SIGTERM),
+        call(123, signal.SIGKILL),
+        call(123, signal.SIGKILL),
+    ]
+    assert instance.process.wait.call_args_list == [call(timeout=5), call()]

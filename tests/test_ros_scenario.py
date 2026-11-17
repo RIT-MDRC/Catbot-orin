@@ -9,9 +9,10 @@ from pathlib import Path
 
 import pytest
 import rclpy
-from catbot_interfaces.msg import ActuatorPositionCommand
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import String
+
+from catbot_interfaces.msg import ActuatorPositionCommand
 
 pytestmark = pytest.mark.ros
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +27,7 @@ def test_simulation_orin_entrypoint(tmp_path):
     (tmp_path / "pyproject.toml").touch()
     (tmp_path / "uv.lock").touch()
     (tmp_path / "run_worker.py").touch()
+    (tmp_path / "config.json").write_text("{}")
     (tmp_path / "src/catbot_rollout").mkdir(parents=True)
     (tmp_path / "src/catbot_rollout/worker.py").touch()
     bundle = tmp_path / "bundle"
