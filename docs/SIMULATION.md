@@ -166,6 +166,18 @@ roots use `policy_artifacts_directory` / `remote_policy_artifacts_directory`;
 Existing explicit `run_directory` / `policy_bundle` paths remain supported when
 `run_id` and `checkpoint` are omitted. CUDA/CPU environment selection is unchanged.
 
+The downloader also discovers `external/catbot_sim_rollout`, pins its
+`catbot-mujoco` dependency to the downloaded manifest's `git_revision`, updates
+its lockfile, and syncs only the simulator's `.venv`. It validates the saved
+environment config before changing `selected`; GPU policy `.venv-cuda` is never
+synced. Run downloads with ROS stopped, since simulator dependencies may change.
+Use `--rollout-repository PATH` for a custom simulator project, or
+`--skip-rollout-setup` for policy-only preparation. If simulator preparation fails,
+dependency files are restored and the previous selection stays in place; its
+`.venv` may already have changed, so rerun preparation before launching. A missing
+or invalid training revision fails explicitly; dirty training revisions produce
+a warning because uncommitted training code cannot be recovered from the SHA.
+
 ## One policy implementation on either machine
 
 Orin's `src/catbot_policy/catbot_policy` is a symlink to the pinned
