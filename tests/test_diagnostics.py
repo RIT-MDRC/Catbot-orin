@@ -117,10 +117,16 @@ def adapter(monkeypatch):
             self.header = SimpleNamespace(stamp=None)
             self.__dict__.update(values)
 
+    class DiagnosticStatus(Message):
+        def __init__(self, **values):
+            level = values.get("level", bytes([0]))
+            assert isinstance(level, bytes) and len(level) == 1
+            super().__init__(**values)
+
     for name, members in {
         "diagnostic_msgs.msg": {
             "DiagnosticArray": Message,
-            "DiagnosticStatus": Message,
+            "DiagnosticStatus": DiagnosticStatus,
             "KeyValue": Message,
         },
         "nav_msgs.msg": {"Odometry": Message},
@@ -171,6 +177,13 @@ def statuses(node):
     }
 
 
+@pytest.mark.parametrize("level", range(4))
+def test_status_levels_use_humble_byte_representation(adapter, level):
+    _, monitor = make_monitor(adapter)
+    status = monitor.status("test", level, "state", {})
+    assert status.level == bytes([level])
+
+
 def test_camera_names_topics_and_serialization(adapter):
     node, _monitor = make_monitor(
         adapter, camera_name="front", monitor_odometry=True, imu_topic="/custom/imu"
@@ -182,7 +195,7 @@ def test_camera_names_topics_and_serialization(adapter):
         "/front/zed_node/odom",
     }
     status = statuses(node)["catbot/zed/image"]
-    assert status.level == WARN and status.hardware_id
+    assert status.level == bytes([WARN]) and status.hardware_id
     assert {v.key: v.value for v in status.values}[
         "topic"
     ] == "/front/zed_node/rgb/image_rect_color"
@@ -212,10 +225,10 @@ def test_unavailable_camera_sensor_then_recovery(adapter, name):
     )
     monitor.streams[name][1].observe(message, adapter.time.monotonic())
     monitor.publish()
-    assert statuses(node)["catbot/" + name].level == ERROR
+    assert statuses(node)["catbot/" + name].level == bytes([ERROR])
     covariance[0] = 0.0
     monitor.publish()
-    assert statuses(node)["catbot/" + name].level == OK
+    assert statuses(node)["catbot/" + name].level == bytes([OK])
 
 
 def test_latched_motor_faults_survive_and_clear(adapter):
@@ -227,20 +240,20 @@ def test_latched_motor_faults_survive_and_clear(adapter):
     )
     monitor.receive_errors(SimpleNamespace(actuators=[motor(axis_error_flags=16)]))
     monitor.publish()
-    assert statuses(node)["catbot/body/motors"].level == ERROR
+    assert statuses(node)["catbot/body/motors"].level == bytes([ERROR])
     monitor.receive_errors(SimpleNamespace(actuators=[motor()]))
     monitor.publish()
-    assert statuses(node)["catbot/body/motors"].level == OK
+    assert statuses(node)["catbot/body/motors"].level == bytes([OK])
     health.last_received -= health.timeout + 1
     monitor.publish()
-    assert statuses(node)["catbot/body/motors"].level == ERROR
+    assert statuses(node)["catbot/body/motors"].level == bytes([ERROR])
 
 
 def test_missing_streams_become_errors(adapter, monkeypatch):
     node, monitor = make_monitor(adapter, monitor_robot=True)
     monkeypatch.setattr(adapter.time, "monotonic", lambda: monitor.started + 61)
     monitor.publish()
-    assert all(s.level == ERROR for s in statuses(node).values())
+    assert all(s.level == bytes([ERROR]) for s in statuses(node).values())
 
 
 @pytest.mark.parametrize(

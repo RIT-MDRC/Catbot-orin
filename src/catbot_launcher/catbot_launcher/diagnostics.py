@@ -140,7 +140,7 @@ class Diagnostics:
         return DiagnosticStatus(
             name=f"catbot/{name}",
             hardware_id=self.hardware_id,
-            level=level,
+            level=bytes([level]),
             message=message,
             values=[
                 KeyValue(key=key, value=str(value)) for key, value in values.items()

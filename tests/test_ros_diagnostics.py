@@ -58,7 +58,7 @@ def test_camera_failure_and_recovery():
             executor.spin_once(timeout_sec=0.02)
             if any(
                 s.name == "catbot/zed/image"
-                and s.level == level
+                and s.level == bytes([level])
                 and phrase in s.message
                 for array in received
                 for s in array.status

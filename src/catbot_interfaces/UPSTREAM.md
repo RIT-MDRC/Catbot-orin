@@ -1,6 +1,3 @@
-Vendored without modification from RIT-MDRC/Catbot, feat/update-main, commit
-`bab64ffb21f62149cc60ba26ed8143af47d32ab4`, src/catbot_interfaces.
+Vendored without modification from RIT-MDRC/Catbot, Dev, commit
+`2550241caf8831d4951db246b79a8f12c7155b27`, src/catbot_interfaces.
 Keep these message definitions identical on the Orin and Pi.
-
-Local extension: `PolicyMetrics.msg` and its CMake registration mirror the Catbot
-working tree (including `external/Catbot`) for typed Foxglove policy telemetry.

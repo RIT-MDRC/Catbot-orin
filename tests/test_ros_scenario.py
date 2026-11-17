@@ -84,7 +84,8 @@ def test_simulation_orin_entrypoint(tmp_path):
                     and metrics
                     and diagnostics
                     and all(
-                        s.level == DiagnosticStatus.OK for s in diagnostics[-1].status
+                        s.level == bytes([DiagnosticStatus.OK])
+                        for s in diagnostics[-1].status
                     )
                     and {"catbot_sim", "catbot_policy", "catbot_diagnostics"}
                     <= set(names)
@@ -104,7 +105,9 @@ def test_simulation_orin_entrypoint(tmp_path):
                 "catbot/policy/feedback",
                 "catbot/policy/output",
             }
-            assert all(s.level == DiagnosticStatus.OK for s in diagnostics[-1].status)
+            assert all(
+                s.level == bytes([DiagnosticStatus.OK]) for s in diagnostics[-1].status
+            )
             contract = json.loads(contracts[-1].data)
             assert contract["policy_contract"] == fixture["metadata"]["policy_contract"]
             assert list(actions[-1].positions_degrees) == pytest.approx(
