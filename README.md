@@ -24,7 +24,7 @@ ros2 launch catbot_launcher main.launch.py
 Foxglove can connect to `ws://<robot-ip>:8765`. The bridge listens on all
 network interfaces, so the robot's firewall must allow inbound TCP port 8765.
 
-The default model is `zedx`. Select the correct model and, optionally, a camera
+The default model is `zed2i`. Select the correct model and, optionally, a camera
 serial number at launch time:
 
 ```bash
@@ -76,6 +76,60 @@ Simulation/kinematics retain their modern Python stack and default to CPU.
 See the scenario guide for the environment setup script and CUDA prerequisites.
 Download a fixed run with `uv run src/catbot_policy/pull_policy.py ENTITY/PROJECT/RUN_ID model_N.pt`;
 launches use that module's selected local artifacts. Camera settings are unchanged.
+
+## Foxglove health diagnostics
+
+Rebuild and source the workspace after updating. The main launch and all four
+scenarios start `catbot_diagnostics` automatically, publishing
+`diagnostic_msgs/msg/DiagnosticArray` on `/diagnostics` once per second.
+In Foxglove, add **Diagnostics – Summary (ROS)**, select `/diagnostics`, and use a
+stale timeout of 5 seconds. Click a row for **Diagnostics – Detail (ROS)** to see
+the topic, message age, thresholds, and decoded motor faults. This uses
+[Foxglove's standard diagnostics panels](https://docs.foxglove.dev/docs/visualization/panels/diagnostics).
+The ZED driver's own diagnostics can share this topic.
+
+The `catbot/` rows cover:
+
+| Row | Checks |
+| --- | --- |
+| `zed/image` | No first image, stopped stream, nonadvancing timestamps, persistent green or malformed/unsupported raw images |
+| `zed/imu` | Missing/stopped IMU, nonadvancing or zero timestamps, unavailable angular velocity |
+| `zed/odometry` | Missing/stopped odometry, nonadvancing or zero timestamps, unavailable pose/velocity (physical scenarios) |
+| `body/joints` | Missing/stopped joint feedback, nonadvancing or zero timestamps, invalid/empty actuator feedback |
+| `policy/feedback` | Missing/stopped policy observations and nonadvancing or zero timestamps |
+| `policy/output` | Missing/stopped position commands from the policy |
+| `body/motors` | Missing CAN heartbeats, decoded ODrive error flags, motors idle/not ready (physical scenarios) |
+
+Rows start at **WARN** while waiting for initial data, become **ERROR** after the
+startup grace, and return to **OK** when fresh valid data resumes. Suspect images
+are WARN during the persistence check. Idle/disarmed motors are WARN. Motor error
+reports are retained because foundation publishes them only on changes; a lost
+joint stream also makes the motor row unconfirmed. Simulation omits camera and
+motor rows unless the camera is explicitly enabled. Camera-only launches omit
+robot and odometry checks because positional tracking may be disabled.
+
+Defaults are a 60-second startup grace for the camera-only launch (the larger
+bridge/policy startup timeout for scenarios), 2 seconds for robot/IMU/odometry
+streams, and 10 seconds for images. The green-image check shares the watchdog's
+98%/5-second defaults and limitations described below. Scenario overrides include
+`diagnostics_stream_timeout:=2.0`, `diagnostics_frame_timeout:=10.0`, and
+`enable_diagnostics:=false`. The camera name and custom IMU/odometry topics follow
+the scenario's settings.
+
+For an externally launched camera/watchdog with only the Foxglove bridge, use:
+
+```bash
+ros2 launch catbot_launcher main.launch.py enable_camera:=false monitor_camera:=true
+```
+
+Physical scenarios keep monitoring the expected camera even with
+`enable_camera:=false`, supporting the separate watchdog below. The watchdog's
+child camera launch disables its own monitor to avoid duplicate health reports.
+The monitor only reports health; it does not restart devices or change motor
+control. It can report camera loss while the rest of the launch stays alive. If
+the whole launch or ROS/network connection stops, Foxglove's stale timeout is
+needed to mark the last reports stale. Host resource exhaustion and faults not
+represented by these inputs require system logs or other diagnostics publishers.
 
 ## ZED green-frame recovery
 

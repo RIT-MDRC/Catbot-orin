@@ -103,11 +103,24 @@ def test_array_length_cannot_change(values):
         decode_setting([0.0] * 4, json.dumps(values))
 
 
-def test_launch_declares_typed_defaults(monkeypatch):
+@pytest.mark.parametrize(
+    "scenario,camera,monitor_camera,motors",
+    [
+        ("simulation_orin", "auto", "false", "false"),
+        ("simulation_pi", "auto", "false", "false"),
+        ("physical_orin", "auto", "true", "true"),
+        ("physical_pi", "auto", "true", "true"),
+        ("physical_orin", "false", "true", "true"),
+        ("simulation_orin", "true", "true", "false"),
+    ],
+)
+def test_launch_declares_typed_defaults(
+    monkeypatch, tmp_path, scenario, camera, monitor_camera, motors
+):
     """Check declaration assembly; ROS executes the deferred callback in its CI job."""
     import sys
     from pathlib import Path
-    from types import ModuleType
+    from types import ModuleType, SimpleNamespace
     from unittest.mock import Mock
 
     from catbot_launcher.scenarios import SCENARIOS, build_launch
@@ -136,10 +149,10 @@ def test_launch_declares_typed_defaults(monkeypatch):
         module.__dict__.update(members)
         monkeypatch.setitem(sys.modules, name, module)
     monkeypatch.delenv("CATBOT_LAUNCH_DEFAULTS", raising=False)
-    assert build_launch("simulation_orin") is description.return_value
+    assert build_launch(scenario) is description.return_value
     assert declarations.call_args_list[0].args == ("scenario",)
     assert declarations.call_args_list[0].kwargs == {
-        "default_value": "simulation_orin",
+        "default_value": scenario,
         "choices": list(SCENARIOS),
     }
     defaults = {
@@ -150,3 +163,26 @@ def test_launch_declares_typed_defaults(monkeypatch):
     assert defaults["enable_foxglove"] == "true"
     assert decode_setting([0, 0, 0], defaults["body_to_camera_xyz"]) == [0, 0, 0]
     assert callable(opaque.call_args.kwargs["function"])
+    # Execute the deferred callback, checking the wiring in every scenario.
+    (tmp_path / "config.json").write_text("{}")
+    raw = {
+        **defaults,
+        "scenario": scenario,
+        "run_directory": str(tmp_path),
+        "enable_camera": camera,
+        "imu_topic": "/custom/imu",
+        "odom_topic": "/custom/odom",
+    }
+    modules["launch.substitutions"]["LaunchConfiguration"].side_effect = lambda key: (
+        SimpleNamespace(perform=lambda context: raw[key])
+    )
+    opaque.call_args.kwargs["function"](None)
+    call = modules["launch.actions"]["IncludeLaunchDescription"].call_args
+    arguments = dict(call.kwargs["launch_arguments"])
+    assert arguments["enable_diagnostics"] == "true"
+    assert arguments["monitor_camera"] == monitor_camera
+    assert arguments["monitor_motors"] == motors
+    assert arguments["monitor_odometry"] == motors
+    assert arguments["monitor_robot"] == "true"
+    assert arguments["imu_topic"] == "/custom/imu"
+    assert arguments["odom_topic"] == "/custom/odom"

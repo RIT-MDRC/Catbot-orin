@@ -1,8 +1,10 @@
 # Catbot operation and load-testing scenarios
 
 All four commands share `catbot_launcher/scenarios.py` and
-`config/scenarios.yaml`. DDS configuration is inherited from the host; nothing
-rewrites it. These are mutually exclusive sessions: stop the previous launch and
+`config/scenarios.yaml`. Local nodes inherit the Orin environment. Remote Pi nodes
+source the configured shared ROS/DDS setup file before the Pi workspace; they do
+not depend on interactive `.bashrc` exports. These are mutually exclusive sessions:
+stop the previous launch and
 any independently started policy/foundation nodes before switching scenarios.
 
 ## Commands
@@ -41,9 +43,10 @@ installed `zed_policy.yaml` and `auto` (on for physical, off for simulation).
 
 Confirmed target setup: Orin workspace `/home/catbot/projects/ros2_ws`, Pi
 `catbot@192.168.0.3` (alternatively `catbot-pi.local`), passwordless SSH, Ubuntu
-22.04 on both machines, uv available, DDS already configured without an extra
-setup script, and NTP active. `/opt/ros/humble/setup.bash` and `/usr/bin/python3`
-remain the expected ROS defaults. The confirmed Pi workspace is
+22.04 on both machines, uv available, and NTP active. The Pi's shared environment
+file is `/home/catbot/.config/catbot/ros_environment.bash`; it sources
+`/opt/ros/humble/setup.bash` and exports the DDS discovery settings.
+`/usr/bin/python3` remains the expected ROS interpreter. The confirmed Pi workspace is
 `/home/catbot/main`; remote model, mapping and inference paths follow it
 automatically. The Orin reports `nvidia-jetpack 6.2.3+b81` and
 `nvidia-l4t-core 36.5.2-20260716114719`. These are reported target versions,
@@ -86,7 +89,13 @@ Defaults derive from the workspace paths:
 - `rollout_repository` and local/remote inference worker projects are derived from
   their workspace paths. Templates support references to other defaults, with
   unknown keys and cycles rejected.
-- `remote_environment`: `/opt/ros/humble/setup.bash`; DDS is inherited unchanged.
+- `remote_environment`: `/home/catbot/.config/catbot/ros_environment.bash`.
+  This file must exist on the Pi and source ROS plus export its DDS settings
+  (`ROS_DISCOVERY_SERVER`, `ROS_SUPER_CLIENT`, `RMW_IMPLEMENTATION`). The launcher
+  sources it, then `{remote_workspace}/install/setup.bash`, then starts the nodes
+  in the same shell. A source failure prevents startup. `.bashrc` can source the
+  same shared file; SSH does not rely on `.bashrc` being read. An explicit
+  `remote_environment:=/other/setup.bash` still overrides the default.
 - `policy_python` / `remote_policy_python`: `auto` selects 3.10 for CUDA and
   3.14 for CPU; a version or interpreter path overrides this selection.
 - `policy_ros_python` / `remote_policy_ros_python`: `/usr/bin/python3`, used only
@@ -103,7 +112,12 @@ ros2 launch catbot_launcher physical_orin.launch.py \
   body_to_camera_xyz:='[0.1, 0.0, 0.05]' ground_height_offset:=0.35
 ```
 
-Other common overrides: `enable_camera:=false`, `enable_foxglove:=false`,
+Health is published on `/diagnostics` for Foxglove's Diagnostics panels; see the
+[health checks and thresholds](../README.md#foxglove-health-diagnostics).
+Physical scenarios monitor the camera even with `enable_camera:=false` for an
+external watchdog. Simulation omits hardware checks by default.
+
+Other common overrides: `enable_camera:=false`, `enable_foxglove:=false`, `enable_diagnostics:=false`,
 `camera_model`, `camera_name`, `serial_number`, `camera_config`, `foxglove_address`,
 `foxglove_port`, `device`, `uv_executable`, `visualization_rate`, `command_timeout`,
 `worker_timeout`, `startup_timeout`, `feedback_timeout`, `sensor_timeout` and
@@ -373,7 +387,11 @@ and unsupported mesh types are not reproduced. Frames/poses refresh up to
 `visualization_rate` (30 Hz by default); markers repeat once per second for viewers
 that connect later. Stop/restart the session when changing odometry frames.
 
-`/policy/metrics` reports actor p50/p95/p99 timing, end-to-end adapter/worker
+`/policy/metrics` uses `catbot_interfaces/msg/PolicyMetrics`, with directly plottable
+numeric fields such as `inference_p95_ms`, `round_trip_p99_ms`, and `published_hz`.
+Rebuild/source interfaces and policy on both hosts after upgrading from the
+former JSON String topic. Unavailable measurements are NaN; `sample_count`
+identifies empty timing windows. It reports actor p50/p95/p99 timing, end-to-end adapter/worker
 round-trip timing, publish rate, missed timer intervals, busy ticks, discarded
 results, and separate adapter/worker CPU and peak memory on the policy host.
 Only one inference request can be in flight. Results based on expired or

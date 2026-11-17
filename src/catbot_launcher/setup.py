@@ -19,6 +19,7 @@ setup(
     entry_points={
         "console_scripts": [
             "zed_watchdog = catbot_launcher.zed_watchdog:main",
+            "diagnostics = catbot_launcher.diagnostics:main",
         ]
     },
     zip_safe=True,

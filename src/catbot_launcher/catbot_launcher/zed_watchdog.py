@@ -141,6 +141,7 @@ def main(argv=None):
         "catbot_launcher",
         "main.launch.py",
         "enable_foxglove:=false",
+        "enable_diagnostics:=false",
         f"camera_model:={args.camera_model}",
         f"camera_name:={args.camera_name}",
         f"serial_number:={args.serial_number}",

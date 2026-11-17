@@ -120,6 +120,9 @@ def build_launch(default_scenario="physical_pi"):
     defaults = yaml.safe_load(defaults_path.read_text())
     defaults.setdefault("camera_config", str(share / "config/zed_policy.yaml"))
     defaults.setdefault("enable_camera", "auto")
+    defaults.setdefault("enable_diagnostics", True)
+    defaults.setdefault("diagnostics_stream_timeout", 2.0)
+    defaults.setdefault("diagnostics_frame_timeout", 10.0)
     declarations = [
         DeclareLaunchArgument(
             "scenario", default_value=default_scenario, choices=list(SCENARIOS)
@@ -204,6 +207,22 @@ def build_launch(default_scenario="physical_pi"):
                 PythonLaunchDescriptionSource(str(share / "launch/main.launch.py")),
                 launch_arguments={
                     "enable_camera": str(camera).lower(),
+                    "enable_diagnostics": str(values["enable_diagnostics"]).lower(),
+                    "monitor_camera": str(camera or backend == "hardware").lower(),
+                    "monitor_odometry": str(backend == "hardware").lower(),
+                    "monitor_robot": "true",
+                    "monitor_motors": str(backend == "hardware").lower(),
+                    "imu_topic": values["imu_topic"],
+                    "odom_topic": values["odom_topic"],
+                    "diagnostics_startup_timeout": str(
+                        max(values["startup_timeout"], values["policy_startup_timeout"])
+                    ),
+                    "diagnostics_stream_timeout": str(
+                        values["diagnostics_stream_timeout"]
+                    ),
+                    "diagnostics_frame_timeout": str(
+                        values["diagnostics_frame_timeout"]
+                    ),
                     "enable_foxglove": str(values["enable_foxglove"]).lower(),
                     "camera_model": values["camera_model"],
                     "camera_name": values["camera_name"],

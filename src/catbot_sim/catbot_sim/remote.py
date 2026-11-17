@@ -51,7 +51,10 @@ def main():
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--policy-bundle", required=True)
     parser.add_argument("--mapping-file", required=True)
-    parser.add_argument("--environment", default="/opt/ros/humble/setup.bash")
+    parser.add_argument(
+        "--environment",
+        default="/home/catbot/.config/catbot/ros_environment.bash",
+    )
     args = parser.parse_args()
     if not all(
         math.isfinite(v) and v > 0

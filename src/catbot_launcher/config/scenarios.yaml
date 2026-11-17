@@ -3,7 +3,8 @@ workspace: /home/catbot/projects/ros2_ws
 remote_host: 192.168.0.3
 remote_user: catbot
 remote_workspace: /home/catbot/main
-remote_environment: /opt/ros/humble/setup.bash
+# Sources ROS and the Pi's shared DDS exports before its workspace and nodes.
+remote_environment: /home/catbot/.config/catbot/ros_environment.bash
 run_id: ''
 checkpoint: ''
 policy_entity: hiromon-rochester-institute-of-technology
@@ -54,6 +55,10 @@ imu_topic: '/{camera_name}/zed_node/imu/data'
 odom_topic: '/{camera_name}/zed_node/odom'
 contact_topic: /body/state/foot_contacts
 enable_foxglove: true
+enable_diagnostics: true
+# Health reporting thresholds, independent of the motion-control safety timeouts.
+diagnostics_stream_timeout: 2.0
+diagnostics_frame_timeout: 10.0
 foxglove_address: 0.0.0.0
 foxglove_port: 8765
 

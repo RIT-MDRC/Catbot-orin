@@ -24,6 +24,16 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("enable_camera", default_value="true"),
+            DeclareLaunchArgument("enable_diagnostics", default_value="true"),
+            DeclareLaunchArgument(
+                "monitor_camera", default_value=LaunchConfiguration("enable_camera")
+            ),
+            DeclareLaunchArgument("monitor_robot", default_value="false"),
+            DeclareLaunchArgument("monitor_motors", default_value="true"),
+            DeclareLaunchArgument("monitor_odometry", default_value="false"),
+            DeclareLaunchArgument("diagnostics_startup_timeout", default_value="60.0"),
+            DeclareLaunchArgument("diagnostics_stream_timeout", default_value="2.0"),
+            DeclareLaunchArgument("diagnostics_frame_timeout", default_value="10.0"),
             DeclareLaunchArgument("enable_foxglove", default_value="true"),
             DeclareLaunchArgument("foxglove_address", default_value="0.0.0.0"),
             DeclareLaunchArgument("foxglove_port", default_value="8765"),
@@ -36,6 +46,12 @@ def generate_launch_description():
                 "camera_name",
                 default_value="zed",
                 description="ROS namespace used for the camera topics",
+            ),
+            DeclareLaunchArgument(
+                "imu_topic", default_value=["/", camera_name, "/zed_node/imu/data"]
+            ),
+            DeclareLaunchArgument(
+                "odom_topic", default_value=["/", camera_name, "/zed_node/odom"]
             ),
             DeclareLaunchArgument(
                 "serial_number",
@@ -64,6 +80,42 @@ def generate_launch_description():
                     "enable_ipc": "false",
                     "ros_params_override_path": config_file,
                 }.items(),
+            ),
+            Node(
+                package="catbot_launcher",
+                executable="diagnostics",
+                name="catbot_diagnostics",
+                condition=IfCondition(LaunchConfiguration("enable_diagnostics")),
+                output="screen",
+                parameters=[
+                    {
+                        **{
+                            key: ParameterValue(
+                                LaunchConfiguration(key), value_type=bool
+                            )
+                            for key in (
+                                "monitor_camera",
+                                "monitor_robot",
+                                "monitor_motors",
+                                "monitor_odometry",
+                            )
+                        },
+                        "camera_name": camera_name,
+                        "imu_topic": LaunchConfiguration("imu_topic"),
+                        "odom_topic": LaunchConfiguration("odom_topic"),
+                        **{
+                            key: ParameterValue(
+                                LaunchConfiguration("diagnostics_" + key),
+                                value_type=float,
+                            )
+                            for key in (
+                                "startup_timeout",
+                                "stream_timeout",
+                                "frame_timeout",
+                            )
+                        },
+                    }
+                ],
             ),
             Node(
                 package="foxglove_bridge",

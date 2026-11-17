@@ -11,6 +11,8 @@ import pytest
 
 from catbot_sim import remote
 
+REAL_POPEN = subprocess.Popen
+
 
 @pytest.fixture
 def ssh(monkeypatch):
@@ -47,11 +49,68 @@ def test_remote_roles_and_quoting(ssh, role):
     shipped = shlex.split(command[-1])
     assert shipped[3] == remote.REMOTE
     script = json.loads(shipped[4])["command"]
+    assert script.startswith(
+        "source /home/catbot/.config/catbot/ros_environment.bash && "
+    )
     assert "source '/workspace with spaces/install/setup.bash'" in script
     assert ("ros2 run foundation main" in script) == (role != "policy")
     assert ("catbot_policy.node" in script) == (role != "foundation")
     assert ("wait -n" in script) == (role == "both")
     child.stdin.close.assert_called_once()
+
+
+@pytest.mark.parametrize("environment_exists", [True, False])
+def test_policy_process_inherits_sourced_environment(
+    ssh, tmp_path, monkeypatch, environment_exists
+):
+    argv, _, spawn = ssh
+    environment = tmp_path / "shared environment.bash"
+    if environment_exists:
+        environment.write_text(
+            "export ROS_DISCOVERY_SERVER='192.168.0.2:11811;192.168.0.3:11811'\n"
+            "export ROS_SUPER_CLIENT=TRUE\n"
+            "export RMW_IMPLEMENTATION=rmw_fastrtps_cpp\n"
+        )
+    install = tmp_path / "install"
+    install.mkdir()
+    (install / "setup.bash").write_text(
+        # Prove the shared exports are already present when the overlay is sourced.
+        'export CATBOT_TEST_SOURCE_ORDER="$ROS_DISCOVERY_SERVER"\n'
+    )
+    probe = tmp_path / "policy probe"
+    probe.write_text("#!/bin/sh\n/usr/bin/env\n")
+    probe.chmod(0o755)
+    argv += [
+        "--role",
+        "policy",
+        "--environment",
+        str(environment),
+        "--workspace",
+        str(tmp_path),
+        "--policy-ros-python",
+        str(probe),
+    ]
+    remote.main()
+    shipped = shlex.split(spawn.call_args.args[0][-1])
+    script = json.loads(shipped[4])["command"]
+    # Bypass the mocked SSH transport but execute its real shell setup/exec chain.
+    with monkeypatch.context() as execution:
+        execution.setattr(subprocess, "Popen", REAL_POPEN)
+        result = subprocess.run(
+            ["bash", "-c", script], capture_output=True, text=True, check=False
+        )
+    if not environment_exists:
+        assert result.returncode != 0
+        assert not result.stdout  # A missing setup must prevent policy startup.
+        return
+    assert result.returncode == 0, result.stderr
+    values = dict(
+        line.split("=", 1) for line in result.stdout.splitlines() if "=" in line
+    )
+    assert values["ROS_DISCOVERY_SERVER"] == "192.168.0.2:11811;192.168.0.3:11811"
+    assert values["ROS_SUPER_CLIENT"] == "TRUE"
+    assert values["RMW_IMPLEMENTATION"] == "rmw_fastrtps_cpp"
+    assert values["CATBOT_TEST_SOURCE_ORDER"] == values["ROS_DISCOVERY_SERVER"]
 
 
 @pytest.mark.parametrize(

@@ -9,10 +9,11 @@ from pathlib import Path
 
 import pytest
 import rclpy
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import String
 
-from catbot_interfaces.msg import ActuatorPositionCommand
+from catbot_interfaces.msg import ActuatorPositionCommand, PolicyMetrics
 
 pytestmark = pytest.mark.ros
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,7 +55,10 @@ def test_simulation_orin_entrypoint(tmp_path):
     log = tmp_path / "launch.log"
     rclpy.init()
     node = rclpy.create_node("scenario_test_probe")
-    contracts, actions = [], []
+    contracts, actions, diagnostics = [], [], []
+    metrics = []
+    node.create_subscription(PolicyMetrics, "/policy/metrics", metrics.append, 1)
+    node.create_subscription(DiagnosticArray, "/diagnostics", diagnostics.append, 10)
     node.create_subscription(
         String,
         "/policy/contract",
@@ -77,12 +81,30 @@ def test_simulation_orin_entrypoint(tmp_path):
                 if (
                     contracts
                     and actions
-                    and {"catbot_sim", "catbot_policy"} <= set(names)
+                    and metrics
+                    and diagnostics
+                    and all(
+                        s.level == DiagnosticStatus.OK for s in diagnostics[-1].status
+                    )
+                    and {"catbot_sim", "catbot_policy", "catbot_diagnostics"}
+                    <= set(names)
                 ):
                     break
                 assert process.poll() is None, log.read_text()
             assert contracts and actions, log.read_text()
+            assert metrics and metrics[-1].published_hz > 0, log.read_text()
+            assert metrics[-1].sample_count > 0
+            assert metrics[-1].control_interval_ms == pytest.approx(
+                fixture["metadata"]["policy_contract"]["control_timestep"] * 1000
+            )
+            assert diagnostics, log.read_text()
             assert {"catbot_sim", "catbot_policy"} <= set(node.get_node_names())
+            assert {s.name for s in diagnostics[-1].status} == {
+                "catbot/body/joints",
+                "catbot/policy/feedback",
+                "catbot/policy/output",
+            }
+            assert all(s.level == DiagnosticStatus.OK for s in diagnostics[-1].status)
             contract = json.loads(contracts[-1].data)
             assert contract["policy_contract"] == fixture["metadata"]["policy_contract"]
             assert list(actions[-1].positions_degrees) == pytest.approx(
