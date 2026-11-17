@@ -9,8 +9,9 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from catbot_sim import remote, remote_supervisor
 from catbot_sim.config import BridgeConfig
+
+from catbot_sim import remote, remote_supervisor
 
 
 class ConfigurationTests(unittest.TestCase):
@@ -110,6 +111,7 @@ class ConfigurationTests(unittest.TestCase):
             patch.object(
                 remote_supervisor.select, "select", return_value=([sys.stdin], [], [])
             ),
+            patch.object(sys.stdin, "fileno", return_value=0),
             patch.object(remote_supervisor.os, "read", return_value=b""),
             patch.object(remote_supervisor.os, "killpg") as kill,
         ):

@@ -1,28 +1,16 @@
 """Single source of launch defaults, placement and topic wiring."""
 
 import json
+import math
 import os
 import shlex
 from pathlib import Path
 from typing import Any
 
 import yaml
-from ament_index_python.packages import get_package_share_directory
 from catbot_policy.artifacts import available_models, resolve_downloaded
 from catbot_policy.configuration import POLICY_PARAMETERS
 from catbot_policy.worker_launch import WorkerLaunchSpec
-from launch import LaunchDescription
-from launch.actions import (
-    DeclareLaunchArgument,
-    ExecuteProcess,
-    IncludeLaunchDescription,
-    OpaqueFunction,
-    Shutdown,
-)
-from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
 
 SCENARIOS = {
     "physical_pi": ("hardware", "pi", "both"),
@@ -64,16 +52,26 @@ def decode_setting(original: Any, value: str) -> Any:
     parsed = yaml.safe_load(value)
     if isinstance(original, bool):
         if not isinstance(parsed, bool):
-            raise ValueError("Boolean launch options must be true or false")
+            raise ValueError("Boolean launch options must be true or false")  # noqa: TRY004 - invalid protocol value
         return parsed
-    if isinstance(original, list):
-        if not isinstance(parsed, list):
-            raise ValueError("Array launch options must be YAML lists")
-        return [float(v) for v in parsed]
-    if isinstance(original, float):
+    if isinstance(original, (list, float, int)):
+        items = parsed if isinstance(original, list) else [parsed]
+        if not isinstance(items, list) or any(
+            isinstance(v, bool)
+            or not isinstance(v, (int, float))
+            or not math.isfinite(v)
+            for v in items
+        ):
+            raise ValueError("Numeric launch options must contain finite numbers")
+        if isinstance(original, list):
+            if len(items) != len(original):
+                raise ValueError("Array launch options must preserve their length")
+            return [float(v) for v in items]
+        if isinstance(original, int):
+            if parsed != int(parsed):
+                raise ValueError("Integer launch options must be integral")
+            return int(parsed)
         return float(parsed)
-    if isinstance(original, int):
-        return int(parsed)
     raise ValueError("Unsupported launch default type")
 
 
@@ -101,6 +99,20 @@ worker_environment_options = WorkerLaunchSpec.resolve
 
 
 def build_launch(default_scenario="physical_pi"):
+    from ament_index_python.packages import get_package_share_directory
+    from launch import LaunchDescription
+    from launch.actions import (
+        DeclareLaunchArgument,
+        ExecuteProcess,
+        IncludeLaunchDescription,
+        OpaqueFunction,
+        Shutdown,
+    )
+    from launch.launch_description_sources import PythonLaunchDescriptionSource
+    from launch.substitutions import LaunchConfiguration
+    from launch_ros.actions import Node
+    from launch_ros.parameter_descriptions import ParameterValue
+
     share = Path(get_package_share_directory("catbot_launcher"))
     defaults_path = Path(
         os.environ.get("CATBOT_LAUNCH_DEFAULTS", share / "config/scenarios.yaml")

@@ -2,14 +2,18 @@
 
 import json
 import math
-import os
 import queue
-import signal
 import subprocess
 import threading
 import time
 
 import rclpy
+from catbot_policy.worker_launch import WorkerLaunchSpec
+from geometry_msgs.msg import Twist
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from std_msgs.msg import Empty, String
+
 from catbot_interfaces.msg import (
     ActuatorKinematicState,
     ActuatorPositionCommand,
@@ -17,18 +21,14 @@ from catbot_interfaces.msg import (
     BodyKinematicState,
     PolicyFeedback,
 )
-from catbot_policy.worker_launch import WorkerLaunchSpec
-from geometry_msgs.msg import Twist
-from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from std_msgs.msg import Empty, String
-
 from catbot_sim.config import BridgeConfig
+from catbot_sim.mapping import apply_positions
 from catbot_sim.physical import PhysicalInputs
 from catbot_sim.visualization import ScenePublisher
+from catbot_sim.worker_process import WorkerProcess
 
 
-class Bridge(Node):
+class Bridge(WorkerProcess, Node):
     def __init__(self):
         super().__init__("catbot_sim")
 
@@ -146,22 +146,9 @@ class Bridge(Node):
             # First target must establish all joints; subsequent commands may be sparse.
             if self.targets is None and set(names) != set(self.names):
                 return
-            targets = list(self.targets) if self.targets is not None else [0.0] * 12
-            for name, value in zip(names, values, strict=True):
-                if name not in self.name_indices:
-                    raise ValueError("Unknown actuator name: " + name)
-                i = self.name_indices[name]
-                if (
-                    not math.isfinite(value)
-                    or not self.mapping["minimum_degrees"][i]
-                    <= value
-                    <= self.mapping["maximum_degrees"][i]
-                ):
-                    raise ValueError("Invalid actuator target")
-                targets[i] = math.radians(
-                    (value - self.mapping["offsets_degrees"][i])
-                    / self.mapping["signs"][i]
-                )
+            targets = apply_positions(
+                self.mapping, self.name_indices, self.targets, names, values
+            )
             self.targets, self.received = targets, time.monotonic()
 
     def velocity(self, message):
@@ -196,12 +183,6 @@ class Bridge(Node):
             scene, poses = self.visual_scene, self.visual_poses
         if scene is not None and poses is not None:
             self.visualization.publish(scene, poses)
-
-    def read_worker(self):
-        line = self.process.stdout.readline()
-        if not line:
-            raise RuntimeError("Simulation worker exited")
-        return json.loads(line)
 
     def run_worker(self):
         try:
@@ -305,8 +286,7 @@ class Bridge(Node):
             and now - self.request_started > self.worker_timeout
         ):
             raise RuntimeError("Kinematics worker stalled")
-        if not hasattr(self, "contract") and now - self.started > self.startup_timeout:
-            raise RuntimeError("Worker initialization timed out")
+        self.check_startup(now)
         if (
             self.backend == "simulation"
             and (self.received is None or self.last_feedback is None)
@@ -358,29 +338,6 @@ class Bridge(Node):
             errors.stamp = message.stamp
             self.error_pub.publish(errors)
         self.last_feedback = sample_time
-
-    def close(self):
-        self.stopping.set()
-        try:
-            os.killpg(self.process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            self.process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(self.process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            self.process.wait()
-        # uv may exit before its worker; also clean up remaining group members.
-        try:
-            os.killpg(self.process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        self.thread.join(timeout=1)
-        self.process.stdin.close()
-        self.process.stdout.close()
 
 
 def main(args=None):
