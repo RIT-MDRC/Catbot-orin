@@ -1,0 +1,67 @@
+# Controlled inputs for launch behavior tests, independent of deployment tuning.
+workspace: /test workspace
+remote_host: test-pi.local
+remote_user: test-user
+remote_workspace: /remote workspace
+remote_environment: /remote environment.bash
+run_id: ''
+checkpoint: ''
+policy_entity: test-team
+policy_project: test-project
+policy_artifacts_directory: '{workspace}/artifacts'
+remote_policy_artifacts_directory: '{remote_workspace}/artifacts'
+remote_policy_bundle: '{remote_workspace}/bundle'
+remote_mapping_file: '{remote_workspace}/mapping.json'
+policy_bundle: '{workspace}/bundle'
+mapping_file: '{workspace}/mapping.json'
+rollout_repository: '{workspace}/rollout'
+run_directory: '{workspace}/saved run'
+uv_executable: /test/uv
+device: cpu
+policy_device: cpu
+remote_policy_device: cpu
+worker_environment: auto
+worker_sync: auto
+policy_worker_environment: auto
+policy_worker_sync: auto
+remote_policy_worker_environment: auto
+remote_policy_worker_sync: auto
+policy_torch_compatibility: exact
+remote_policy_torch_compatibility: load
+command_timeout: 0.4
+worker_timeout: 3.5
+feedback_timeout: 0.6
+visualization_rate: 17.0
+startup_timeout: 40.0
+sensor_timeout: 0.5
+sensor_max_skew: 0.15
+ground_height_offset: 0.25
+contact_height: 0.03
+estimate_contacts: false
+body_from_camera_wxyz: [1.0, 0.0, 0.0, 0.0]
+body_from_imu_wxyz: [1.0, 0.0, 0.0, 0.0]
+body_to_camera_xyz: [0.1, 0.2, 0.3]
+imu_includes_gravity: false
+camera_model: test-camera
+camera_name: front
+serial_number: '123'
+imu_topic: '/{camera_name}/imu'
+odom_topic: '/{camera_name}/odom'
+contact_topic: /test/contacts
+enable_camera: auto
+enable_foxglove: false
+enable_diagnostics: false
+diagnostics_stream_timeout: 4.0
+diagnostics_frame_timeout: 8.0
+foxglove_address: 127.0.0.1
+foxglove_port: 9876
+policy_python: '3.14'
+remote_policy_python: '3.14'
+policy_ros_python: /test/python3
+remote_policy_ros_python: /remote/python3
+policy_worker_project: '{workspace}/inference'
+remote_policy_worker_project: '{remote_workspace}/inference'
+policy_uv_executable: /test/uv
+remote_policy_uv_executable: /remote/uv
+policy_worker_timeout: 5.0
+policy_startup_timeout: 50.0

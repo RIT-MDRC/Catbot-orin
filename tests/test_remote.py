@@ -19,7 +19,11 @@ def ssh(monkeypatch):
     argv = [
         "remote",
         "--user",
-        "user",
+        "test-user",
+        "--host",
+        "test-pi.local",
+        "--environment",
+        "/test environment/ros.bash",
         "--workspace",
         "/workspace with spaces",
         "--policy-worker-project",
@@ -45,13 +49,11 @@ def test_remote_roles_and_quoting(ssh, role):
     remote.main()
     command = spawn.call_args.args[0]
     assert command[:3] == ["ssh", "-T", "-o"]
-    assert command[-2] == "user@192.168.0.3"
+    assert command[-2] == "test-user@test-pi.local"
     shipped = shlex.split(command[-1])
     assert shipped[3] == remote.REMOTE
     script = json.loads(shipped[4])["command"]
-    assert script.startswith(
-        "source /home/catbot/.config/catbot/ros_environment.bash && "
-    )
+    assert script.startswith("source '/test environment/ros.bash' && ")
     assert "source '/workspace with spaces/install/setup.bash'" in script
     assert ("ros2 run foundation main" in script) == (role != "policy")
     assert ("catbot_policy.node" in script) == (role != "foundation")
@@ -137,6 +139,68 @@ def test_invalid_timeout_never_spawns(ssh, option, value):
         remote.main()
     assert error.value.code == 2
     spawn.assert_not_called()
+
+
+def test_unknown_option_never_spawns(ssh):
+    argv, _, spawn = ssh
+    argv.append("--misspelled-option")
+    with pytest.raises(SystemExit) as error:
+        remote.main()
+    assert error.value.code == 2
+    spawn.assert_not_called()
+
+
+def test_policy_arguments_survive_shell_quoting(ssh, tmp_path, monkeypatch):
+    argv, _, spawn = ssh
+    environment = tmp_path / "ros environment.bash"
+    environment.touch()
+    install = tmp_path / "install"
+    install.mkdir()
+    (install / "setup.bash").touch()
+    probe = tmp_path / "policy probe"
+    probe.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
+    probe.chmod(0o755)
+    argv += [
+        "--role",
+        "policy",
+        "--environment",
+        str(environment),
+        "--workspace",
+        str(tmp_path),
+        "--policy-ros-python",
+        str(probe),
+        "--policy-bundle",
+        "/bundle with spaces/'quoted'",
+        "--mapping-file",
+        "/mapping with spaces.json",
+        "--feedback-timeout",
+        "0.75",
+        "--policy-worker-timeout",
+        "4.5",
+        "--policy-device",
+        "cpu",
+    ]
+    remote.main()
+    shipped = shlex.split(spawn.call_args.args[0][-1])
+    script = json.loads(shipped[4])["command"]
+    with monkeypatch.context() as execution:
+        execution.setattr(subprocess, "Popen", REAL_POPEN)
+        result = subprocess.run(
+            ["bash", "-c", script], capture_output=True, text=True, check=False
+        )
+    assert result.returncode == 0, result.stderr
+    arguments = result.stdout.splitlines()
+    assert arguments[:2] == ["-m", "catbot_policy.node"]
+    parameters = dict(
+        arguments[i + 1].split(":=", 1)
+        for i, argument in enumerate(arguments)
+        if argument == "-p"
+    )
+    assert json.loads(parameters["policy_bundle"]) == "/bundle with spaces/'quoted'"
+    assert json.loads(parameters["mapping_file"]) == "/mapping with spaces.json"
+    assert json.loads(parameters["feedback_timeout"]) == 0.75
+    assert json.loads(parameters["policy_worker_timeout"]) == 4.5
+    assert json.loads(parameters["policy_device"]) == "cpu"
 
 
 def test_lease_is_written_and_flushed(ssh, monkeypatch):
