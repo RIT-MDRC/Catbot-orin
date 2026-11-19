@@ -14,7 +14,7 @@ from catbot_policy.worker_launch import WorkerLaunchSpec
 
 SCENARIOS = {
     "physical_pi": ("hardware", "pi", "both"),
-    "physical_orin": ("hardware", "orin", "foundation"),
+    "physical_orin": ("hardware", "orin", None),
     "simulation_pi": ("simulation", "pi", "policy"),
     "simulation_orin": ("simulation", "orin", None),
 }
@@ -98,7 +98,7 @@ class ExpandedSettings(dict):
 worker_environment_options = WorkerLaunchSpec.resolve
 
 
-def build_launch(default_scenario="physical_pi"):
+def build_launch(default_scenario="physical_orin"):
     from ament_index_python.packages import get_package_share_directory
     from launch import LaunchDescription
     from launch.actions import (
@@ -117,7 +117,10 @@ def build_launch(default_scenario="physical_pi"):
     defaults_path = Path(
         os.environ.get("CATBOT_LAUNCH_DEFAULTS", share / "config/scenarios.yaml")
     )
-    defaults = yaml.safe_load(defaults_path.read_text())
+    defaults = {
+        **yaml.safe_load((share / "config/orin_supervisor.yaml").read_text()),
+        **yaml.safe_load(defaults_path.read_text()),
+    }
     defaults.setdefault("camera_config", str(share / "config/zed_policy.yaml"))
     defaults.setdefault("enable_camera", "auto")
     defaults.setdefault("enable_diagnostics", True)
@@ -139,6 +142,10 @@ def build_launch(default_scenario="physical_pi"):
     def start(context):
         name = LaunchConfiguration("scenario").perform(context)
         backend, policy_host, remote_role = SCENARIOS[name]
+        if name == "physical_pi":
+            raise ValueError(
+                "physical_pi is deprecated; start the Pi supervisor independently and use physical_orin"
+            )
         raw = {key: LaunchConfiguration(key).perform(context) for key in defaults}
         expanded = ExpandedSettings(raw)
         values: dict[str, Any] = {}
@@ -247,8 +254,8 @@ def build_launch(default_scenario="physical_pi"):
         if policy_host == "orin":
             actions.append(
                 Node(
-                    package="catbot_policy",
-                    executable="policy",
+                    package="catbot_supervisor",
+                    executable="orin",
                     prefix=shlex.quote(values["policy_ros_python"]),
                     output="screen",
                     on_exit=Shutdown(),
@@ -259,7 +266,17 @@ def build_launch(default_scenario="physical_pi"):
                                 for key in POLICY_PARAMETERS
                                 if key != "simulation_mode"
                             },
-                            "simulation_mode": True,
+                            "simulation_mode": backend == "simulation",
+                            "scenario": name,
+                            **{
+                                key.removeprefix("supervisor_"): values[key]
+                                for key in values
+                                if key.startswith("supervisor_")
+                                and key
+                                not in ("supervisor_run_id", "supervisor_git_commit")
+                            },
+                            "supervisor_run_id": values["supervisor_run_id"],
+                            "git_commit": values["supervisor_git_commit"],
                             "policy_python": ParameterValue(
                                 values["policy_python"], value_type=str
                             ),
@@ -271,7 +288,6 @@ def build_launch(default_scenario="physical_pi"):
                             ),
                         }
                     ],
-                    remappings=[("/simulation/contract", "/policy/contract")],
                 )
             )
         if remote_role is not None:

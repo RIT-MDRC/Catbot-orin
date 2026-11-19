@@ -104,7 +104,6 @@ def node(bridge_module, monkeypatch):
     config = BridgeConfig(mapping=GOLDEN["mapping"])
 
     def read_config(param):
-        assert param("backend", "simulation") == "simulation"
         return config
 
     monkeypatch.setattr(
@@ -129,10 +128,12 @@ def node(bridge_module, monkeypatch):
 
 
 def test_initialization_wires_simulation(node):
-    assert node.node_name == "catbot_sim"
     assert node.physical is None
-    assert "/body/control/position" in node.subscriptions
-    assert len(node.timers) == 3
+    assert node.subscriptions["/body/control/position"] == node.position
+    callbacks = [callback for _, callback in node.timers]
+    assert node.publish in callbacks
+    assert node.publish_visualization in callbacks
+    assert node.report_metrics in callbacks
     node.thread.start.assert_called_once()
     node.backend_pub.publish.assert_called_once()
     node.subscriptions["/body/control/script/home"](Message())

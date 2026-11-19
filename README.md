@@ -184,3 +184,12 @@ persistent memory shortage. Hardware recovery and detection thresholds still
 need validation on the Orin. This watchdog does not disarm motors or invalidate
 policy observations; keep the robot stationary during recovery testing, and
 require a separate stale-sensor stop in motion control before unattended use.
+
+## Orin Supervisor
+
+The Orin-hosted physical and simulation scenarios now launch the managed Orin
+Supervisor next to the feedback bridge. Pi startup, body scripts and action
+forwarding remain on the independently launched Pi Supervisor. See
+[deployment and API verification](docs/SUPERVISOR.md) and the Orin-owned
+[`orin_supervisor.yaml`](src/catbot_launcher/config/orin_supervisor.yaml).
+Recording and offline/shadow simulation remain deferred.

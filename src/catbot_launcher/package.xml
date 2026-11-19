@@ -30,4 +30,5 @@
   <export>
     <build_type>ament_python</build_type>
   </export>
+  <exec_depend>catbot_supervisor</exec_depend>
 </package>
