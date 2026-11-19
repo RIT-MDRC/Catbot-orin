@@ -98,7 +98,7 @@ class ExpandedSettings(dict):
 worker_environment_options = WorkerLaunchSpec.resolve
 
 
-def build_launch(default_scenario="physical_pi"):
+def build_launch(default_scenario="physical_orin"):
     from ament_index_python.packages import get_package_share_directory
     from launch import LaunchDescription
     from launch.actions import (
