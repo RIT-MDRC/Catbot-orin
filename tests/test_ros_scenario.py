@@ -203,12 +203,20 @@ def test_simulation_orin_entrypoint(tmp_path):
                 fixture["degrees"]
             )
     finally:
-        if process is not None:
-            os.killpg(process.pid, signal.SIGINT)
-            try:
-                process.wait(timeout=12)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait(timeout=3)
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            if process is not None:
+                try:
+                    os.killpg(process.pid, signal.SIGINT)
+                except ProcessLookupError:
+                    pass
+                try:
+                    process.wait(timeout=12)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait(timeout=3)
+        finally:
+            node.destroy_node()
+            rclpy.shutdown()
