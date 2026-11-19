@@ -17,7 +17,7 @@ jobs:
           cache-dependency-glob: '**/tests/uv.lock'
       - name: Existing foundation and UI tests
         working-directory: external/Catbot
-        run: uv run --locked --group dev python -m pytest src/foundation/test/test_actuator.py src/foundation/test/test_body_control.py src/foundation/test/test_body_state.py src/foundation/test/test_odrive_position.py src/ui/test/test_policy_commands.py --junitxml=foundation-tests.xml
+        run: uv run --locked --group dev python -m pytest src/foundation/test/test_actuator.py src/foundation/test/test_body_control.py src/foundation/test/test_body_state.py src/foundation/test/test_odrive_position.py src/ui/test/test_policy_commands.py src/foundation/test/test_body_io.py src/catbot_supervisor/test --junitxml=foundation-tests.xml
       - name: Catbot policy suite and coverage floors
         working-directory: external/Catbot/
         run: |
@@ -59,7 +59,7 @@ jobs:
         shell: bash
         run: |
           source /opt/ros/humble/setup.bash
-          colcon build --base-paths external/Catbot/src/catbot_interfaces external/Catbot/src/catbot_policy src/catbot_sim src/catbot_launcher --cmake-args -DBUILD_TESTING=OFF
+          colcon build --base-paths external/Catbot/src/catbot_interfaces external/Catbot/src/catbot_policy external/Catbot/src/foundation external/Catbot/src/catbot_supervisor src/catbot_sim src/catbot_launcher --cmake-args -DBUILD_TESTING=OFF
       - name: ROS integration tests (required, no import skips)
         shell: bash
         env:

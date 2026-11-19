@@ -173,6 +173,10 @@ def test_launch_applies_overrides_and_routes_workers(
     modules["launch.substitutions"]["LaunchConfiguration"].side_effect = lambda key: (
         SimpleNamespace(perform=lambda context: raw[key])
     )
+    if scenario == "physical_pi":
+        with pytest.raises(ValueError, match="deprecated"):
+            opaque.call_args.kwargs["function"](None)
+        return
     opaque.call_args.kwargs["function"](None)
     call = modules["launch.actions"]["IncludeLaunchDescription"].call_args
     arguments = dict(call.kwargs["launch_arguments"])
@@ -197,14 +201,16 @@ def test_launch_applies_overrides_and_routes_workers(
     assert bridge["estimate_contacts"] is True
     assert bridge["mapping_file"] == "/test workspace/mapping.json"
     if scenario.endswith("orin"):
-        policy = nodes["catbot_policy"]["parameters"][0]
+        policy = nodes["catbot_supervisor"]["parameters"][0]
         assert policy["policy_bundle"] == "/test workspace/bundle"
         assert policy["feedback_timeout"] == 0.6
-        assert policy["simulation_mode"] is True
+        assert policy["simulation_mode"] is scenario.startswith("simulation")
+        assert policy["scenario"] == scenario
+        assert nodes["catbot_supervisor"]["executable"] == "orin"
     else:
         assert "catbot_policy" not in nodes
     processes = modules["launch.actions"]["ExecuteProcess"].call_args_list
-    if scenario == "simulation_orin":
+    if scenario.endswith("orin"):
         assert not processes
     else:
         command = processes[0].kwargs["cmd"]

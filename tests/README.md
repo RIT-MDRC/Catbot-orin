@@ -34,3 +34,10 @@ after the launch leader exits. Real local process tests verify workers are reape
 after lease expiry, disconnect, signal shutdown and SIGKILL escalation, including
 a stubborn descendant surviving its launch leader. SSH and target hardware are
 not required.
+
+The Orin-hosted scenario checks require the `catbot_supervisor` package from the
+pinned Catbot dependency. The ROS scenario test uses a Pi protocol peer to exercise
+probe/clock replies, preflight, explicit policy start, forwarding acknowledgements,
+verified readiness, telemetry tags and the status service. It does not launch Pi
+hardware or introduce a separate joint-repository test framework. The physical
+Orin launch no longer starts Foundation over SSH; Pi launch/config is independent.
