@@ -11,11 +11,15 @@ import pytest
 import rclpy
 from catbot_interfaces.srv import GetSupervisorStatus, SupervisorJob
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
+from nav_msgs.msg import Odometry
 from rclpy.qos import DurabilityPolicy, QoSProfile
+from sensor_msgs.msg import Imu
 from std_msgs.msg import String, UInt64
 
 from catbot_interfaces.msg import (
+    ActuatorKinematicState,
     ActuatorPositionCommand,
+    BodyKinematicState,
     ClockProbe,
     ClockReply,
     OrinHeartbeat,
@@ -23,6 +27,7 @@ from catbot_interfaces.msg import (
     PolicyAction,
     PolicyActionAck,
     PolicyMetrics,
+    PolicyReady,
 )
 
 pytestmark = pytest.mark.ros
@@ -30,7 +35,9 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "external/Catbot/tests/fixtures"
 
 
-def test_simulation_orin_entrypoint(tmp_path):
+@pytest.mark.parametrize("scenario", ["simulation_orin", "physical_orin"])
+def test_orin_entrypoint(tmp_path, scenario):
+    simulation = scenario == "simulation_orin"
     fixture = json.loads((FIXTURES / "contract.json").read_text())
     mapping = tmp_path / "mapping.json"
     mapping.write_text(json.dumps(fixture["mapping"]))
@@ -51,9 +58,12 @@ def test_simulation_orin_entrypoint(tmp_path):
         "ros2",
         "launch",
         "catbot_launcher",
-        "simulation_orin.launch.py",
+        f"{scenario}.launch.py",
         "enable_camera:=false",
         "enable_foxglove:=false",
+        f"enable_diagnostics:={str(simulation).lower()}",
+        "imu_topic:=/test/imu",
+        "odom_topic:=/test/odom",
         "orin_device:=cpu",
         "supervisor_git_commit:=test-commit",
         f"supervisor_resource_sys_root:={tmp_path / 'sys'}",
@@ -71,22 +81,13 @@ def test_simulation_orin_entrypoint(tmp_path):
     rclpy.init()
     node = rclpy.create_node("scenario_test_probe")
     contracts, actions, diagnostics = [], [], []
-    metrics = []
+    metrics, readiness = [], []
     heartbeats, telemetry = [], []
     node.create_subscription(
         OrinHeartbeat, "/orin/supervisor/heartbeat", heartbeats.append, 1
     )
     node.create_subscription(
         OrinTelemetry, "/orin/supervisor/telemetry", telemetry.append, 1
-    )
-    # Pi protocol peer: tests this repository's service wiring without launching hardware.
-    probes = node.create_publisher(UInt64, "/orin/supervisor/probe", 1)
-    replies = node.create_publisher(ClockReply, "/rpi/supervisor/clock_reply", 1)
-    acknowledgements = node.create_publisher(
-        PolicyActionAck, "/rpi/supervisor/action_ack", 1
-    )
-    positions = node.create_publisher(
-        ActuatorPositionCommand, "/body/control/position", 1
     )
     sequence = [0]
     standby_since = None
@@ -95,8 +96,6 @@ def test_simulation_orin_entrypoint(tmp_path):
     def probe():
         sequence[0] += 1
         probes.publish(UInt64(data=sequence[0]))
-
-    node.create_timer(0.1, probe)
 
     def clock(message):
         stamp = node.get_clock().now().to_msg()
@@ -109,8 +108,6 @@ def test_simulation_orin_entrypoint(tmp_path):
             )
         )
 
-    node.create_subscription(ClockProbe, "/orin/supervisor/clock_probe", clock, 1)
-
     def accept(message):
         positions.publish(message.command)
         acknowledgements.publish(
@@ -119,11 +116,55 @@ def test_simulation_orin_entrypoint(tmp_path):
             )
         )
 
-    node.create_subscription(PolicyAction, "/orin/policy/action", accept, 1)
-    job = node.create_client(SupervisorJob, "/orin/supervisor/job")
-    status = node.create_client(GetSupervisorStatus, "/orin/supervisor/get_status")
+    if not simulation:
+        # Only hardware scenarios have a Pi peer. The local simulation must
+        # produce actions without leases, clock replies, jobs or forwarding.
+        probes = node.create_publisher(UInt64, "/orin/supervisor/probe", 1)
+        replies = node.create_publisher(ClockReply, "/rpi/supervisor/clock_reply", 1)
+        acknowledgements = node.create_publisher(
+            PolicyActionAck, "/rpi/supervisor/action_ack", 1
+        )
+        positions = node.create_publisher(
+            ActuatorPositionCommand, "/body/control/position", 1
+        )
+        node.create_timer(0.1, probe)
+        node.create_subscription(ClockProbe, "/orin/supervisor/clock_probe", clock, 1)
+        node.create_subscription(PolicyAction, "/orin/policy/action", accept, 1)
+        job = node.create_client(SupervisorJob, "/orin/supervisor/job")
+        status = node.create_client(GetSupervisorStatus, "/orin/supervisor/get_status")
+        imu = node.create_publisher(Imu, "/test/imu", 1)
+        odom = node.create_publisher(Odometry, "/test/odom", 1)
+        joints = node.create_publisher(BodyKinematicState, "/body/state/position", 1)
+
+        def sensors():
+            stamp = node.get_clock().now().to_msg()
+            inertial = Imu()
+            inertial.header.stamp = stamp
+            imu.publish(inertial)
+            pose = Odometry()
+            pose.header.stamp = stamp
+            pose.header.frame_id = "test/world"
+            pose.pose.pose.orientation.w = 1.0
+            odom.publish(pose)
+            joints.publish(
+                BodyKinematicState(
+                    stamp=stamp,
+                    actuators=[
+                        ActuatorKinematicState(actuator_name=name, valid=True)
+                        for name in fixture["mapping"]["actuator_names"]
+                    ],
+                )
+            )
+
+        node.create_timer(0.05, sensors)
     start_future = None
     node.create_subscription(PolicyMetrics, "/policy/metrics", metrics.append, 1)
+    node.create_subscription(
+        PolicyReady,
+        "/orin/policy/ready",
+        readiness.append,
+        QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL),
+    )
     node.create_subscription(DiagnosticArray, "/diagnostics", diagnostics.append, 10)
     node.create_subscription(
         String,
@@ -145,7 +186,8 @@ def test_simulation_orin_entrypoint(tmp_path):
                 rclpy.spin_once(node, timeout_sec=0.1)
                 names = node.get_node_names()
                 if (
-                    start_future is None
+                    not simulation
+                    and start_future is None
                     and heartbeats
                     and heartbeats[-1].preflight_passed
                     and job.service_is_ready()
@@ -166,49 +208,62 @@ def test_simulation_orin_entrypoint(tmp_path):
                     contracts
                     and actions
                     and metrics
-                    and diagnostics
-                    and all(
-                        s.level == DiagnosticStatus.OK for s in diagnostics[-1].status
+                    and readiness
+                    and readiness[-1].ready
+                    and {"catbot_sim", "catbot_policy"} <= set(names)
+                    and (
+                        not simulation
+                        or (
+                            diagnostics
+                            and all(
+                                s.level == DiagnosticStatus.OK
+                                for s in diagnostics[-1].status
+                            )
+                        )
                     )
-                    and {
-                        "catbot_sim",
-                        "catbot_policy",
-                        "catbot_diagnostics",
-                        "orin_supervisor",
-                    }
-                    <= set(names)
                 ):
                     break
                 assert process.poll() is None, log.read_text()
             assert contracts and actions, log.read_text()
-            assert saw_standby, (
-                "Launch did not wait for an explicit policy start request"
-            )
-            assert heartbeats[-1].policy_ready and heartbeats[-1].policy_verified
-            assert heartbeats[-1].bundle_id == fixture["metadata"]["policy_sha256"]
-            assert telemetry and telemetry[-1].scenario == "simulation_orin"
-            assert telemetry[-1].bundle_id == fixture["metadata"]["policy_sha256"]
-            assert telemetry[-1].run_id and telemetry[-1].git_commit == "test-commit"
-            query = status.call_async(GetSupervisorStatus.Request(name="policy"))
-            deadline = time.monotonic() + 3
-            while not query.done() and time.monotonic() < deadline:
-                rclpy.spin_once(node, timeout_sec=0.02)
-            assert query.done() and query.result().success
-            state = json.loads(query.result().status_json)
-            assert state["version"] == 1 and state["policy"]["verified"]
+            assert readiness[-1].ready and readiness[-1].verified
+            assert readiness[-1].bundle_id == fixture["metadata"]["policy_sha256"]
+            if simulation:
+                assert "orin_supervisor" not in node.get_node_names()
+                assert not heartbeats and not telemetry
+            else:
+                assert saw_standby, (
+                    "Hardware launch did not wait for an explicit policy start request"
+                )
+                assert heartbeats[-1].policy_ready and heartbeats[-1].policy_verified
+                assert heartbeats[-1].bundle_id == fixture["metadata"]["policy_sha256"]
+                assert telemetry and telemetry[-1].scenario == scenario
+                assert telemetry[-1].bundle_id == fixture["metadata"]["policy_sha256"]
+                assert (
+                    telemetry[-1].run_id and telemetry[-1].git_commit == "test-commit"
+                )
+                query = status.call_async(GetSupervisorStatus.Request(name="policy"))
+                deadline = time.monotonic() + 3
+                while not query.done() and time.monotonic() < deadline:
+                    rclpy.spin_once(node, timeout_sec=0.02)
+                assert query.done() and query.result().success
+                state = json.loads(query.result().status_json)
+                assert state["version"] == 1 and state["policy"]["verified"]
             assert metrics and metrics[-1].published_hz > 0, log.read_text()
             assert metrics[-1].sample_count > 0
             assert metrics[-1].control_interval_ms == pytest.approx(
                 fixture["metadata"]["policy_contract"]["control_timestep"] * 1000
             )
-            assert diagnostics, log.read_text()
             assert {"catbot_sim", "catbot_policy"} <= set(node.get_node_names())
-            assert {s.name for s in diagnostics[-1].status} == {
-                "catbot/body/joints",
-                "catbot/policy/feedback",
-                "catbot/policy/output",
-            }
-            assert all(s.level == DiagnosticStatus.OK for s in diagnostics[-1].status)
+            if simulation:
+                assert diagnostics, log.read_text()
+                assert {s.name for s in diagnostics[-1].status} == {
+                    "catbot/body/joints",
+                    "catbot/policy/feedback",
+                    "catbot/policy/output",
+                }
+                assert all(
+                    s.level == DiagnosticStatus.OK for s in diagnostics[-1].status
+                )
             contract = json.loads(contracts[-1].data)
             assert contract["policy_contract"] == fixture["metadata"]["policy_contract"]
             assert list(actions[-1].positions_degrees) == pytest.approx(

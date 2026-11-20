@@ -10,8 +10,9 @@ The ROS job builds `catbot_interfaces`, `catbot_policy`, `catbot_sim`, and
 plugin autoload disabled. It launches the real `simulation_orin.launch.py` entry
 point with camera/Foxglove disabled and the shared stdlib fake worker replacing
 both external workers. It requires both adapter nodes, `/policy/contract`, and
-actuator commands matching the shared fixture. No hardware or model artifacts
-are required. Missing ROS bindings fail this job instead of skipping it.
+actuator commands matching the shared fixture, without a Pi protocol peer or
+policy-start request. No hardware or model artifacts are required. Missing ROS
+bindings fail this job instead of skipping it.
 
 Unit launch tests use `fixtures/launch_defaults.yaml` and explicit CLI overrides,
 then check typed node parameters and local/remote placement. Mapping and SSH tests
@@ -36,7 +37,8 @@ a stubborn descendant surviving its launch leader. SSH and target hardware are
 not required.
 
 The Orin-hosted scenario checks require the `catbot_supervisor` package from the
-pinned Catbot dependency. The ROS scenario test uses a Pi protocol peer to exercise
+pinned Catbot dependency. The physical Orin ROS scenario test uses synthetic
+sensor input and a Pi protocol peer to exercise
 probe/clock replies, preflight, explicit policy start, forwarding acknowledgements,
 verified readiness, telemetry tags and the status service. It does not launch Pi
 hardware or introduce a separate joint-repository test framework. The physical

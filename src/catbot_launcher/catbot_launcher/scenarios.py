@@ -252,42 +252,57 @@ def build_launch(default_scenario="physical_orin"):
             )
         )
         if policy_host == "orin":
+            policy_parameters = {
+                **{
+                    key: values[key]
+                    for key in POLICY_PARAMETERS
+                    if key != "simulation_mode"
+                },
+                "simulation_mode": backend == "simulation",
+                "policy_python": ParameterValue(
+                    values["policy_python"], value_type=str
+                ),
+                "policy_worker_environment": ParameterValue(
+                    values["policy_worker_environment"], value_type=str
+                ),
+                "policy_worker_sync": ParameterValue(
+                    values["policy_worker_sync"], value_type=str
+                ),
+            }
+            if backend == "simulation":
+                # All-local simulation has no Pi lease or action-forwarding peer.
+                policy_parameters.update(
+                    supervised_actions=False,
+                    require_provider_contract=True,
+                    provider_contract_topic="/policy/contract",
+                )
+            else:
+                policy_parameters.update(
+                    {
+                        "scenario": name,
+                        **{
+                            key.removeprefix("supervisor_"): values[key]
+                            for key in values
+                            if key.startswith("supervisor_")
+                            and key
+                            not in ("supervisor_run_id", "supervisor_git_commit")
+                        },
+                        "supervisor_run_id": values["supervisor_run_id"],
+                        "git_commit": values["supervisor_git_commit"],
+                    }
+                )
             actions.append(
                 Node(
-                    package="catbot_supervisor",
-                    executable="orin",
+                    package=(
+                        "catbot_policy"
+                        if backend == "simulation"
+                        else "catbot_supervisor"
+                    ),
+                    executable="policy" if backend == "simulation" else "orin",
                     prefix=shlex.quote(values["policy_ros_python"]),
                     output="screen",
                     on_exit=Shutdown(),
-                    parameters=[
-                        {
-                            **{
-                                key: values[key]
-                                for key in POLICY_PARAMETERS
-                                if key != "simulation_mode"
-                            },
-                            "simulation_mode": backend == "simulation",
-                            "scenario": name,
-                            **{
-                                key.removeprefix("supervisor_"): values[key]
-                                for key in values
-                                if key.startswith("supervisor_")
-                                and key
-                                not in ("supervisor_run_id", "supervisor_git_commit")
-                            },
-                            "supervisor_run_id": values["supervisor_run_id"],
-                            "git_commit": values["supervisor_git_commit"],
-                            "policy_python": ParameterValue(
-                                values["policy_python"], value_type=str
-                            ),
-                            "policy_worker_environment": ParameterValue(
-                                values["policy_worker_environment"], value_type=str
-                            ),
-                            "policy_worker_sync": ParameterValue(
-                                values["policy_worker_sync"], value_type=str
-                            ),
-                        }
-                    ],
+                    parameters=[policy_parameters],
                 )
             )
         if remote_role is not None:

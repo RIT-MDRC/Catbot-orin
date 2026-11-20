@@ -33,6 +33,11 @@ rollout. The adapter needs the same model/configuration as the policy to compute
 foot history and render measured joint positions. Simulation launches omit the
 camera by default. Every launch includes exactly one Foxglove bridge.
 
+`simulation_orin` starts the policy automatically and sends its actuator commands
+directly to the simulator after validating `/policy/contract`. It needs no Pi
+connection or supervisor job request. `physical_orin` uses the Orin supervisor
+and retains the Pi lease, preflight and explicit policy-start requirements.
+
 ## Defaults and overrides
 
 The checked-in `src/catbot_launcher/config/scenarios.yaml` holds shared values.

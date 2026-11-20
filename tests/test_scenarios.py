@@ -200,7 +200,20 @@ def test_launch_applies_overrides_and_routes_workers(
     assert bridge["body_to_camera_xyz"] == [0.4, -0.2, 0.1]
     assert bridge["estimate_contacts"] is True
     assert bridge["mapping_file"] == "/test workspace/mapping.json"
-    if scenario.endswith("orin"):
+    if scenario == "simulation_orin":
+        assert "catbot_supervisor" not in nodes
+        policy_node = nodes["catbot_policy"]
+        assert policy_node["executable"] == "policy"
+        assert policy_node["prefix"] == "/test/python3"
+        policy = policy_node["parameters"][0]
+        assert policy["policy_bundle"] == "/test workspace/bundle"
+        assert policy["feedback_timeout"] == 0.6
+        assert policy["simulation_mode"] is True
+        assert policy["supervised_actions"] is False
+        assert policy["require_provider_contract"] is True
+        assert policy["provider_contract_topic"] == "/policy/contract"
+    elif scenario == "physical_orin":
+        assert "catbot_policy" not in nodes
         policy = nodes["catbot_supervisor"]["parameters"][0]
         assert policy["policy_bundle"] == "/test workspace/bundle"
         assert policy["feedback_timeout"] == 0.6
