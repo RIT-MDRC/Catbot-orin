@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 import rclpy
+from catbot_interfaces.srv import GetSupervisorStatus, SupervisorJob
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import String, UInt64
@@ -23,7 +24,6 @@ from catbot_interfaces.msg import (
     PolicyActionAck,
     PolicyMetrics,
 )
-from catbot_interfaces.srv import GetSupervisorStatus, SupervisorJob
 
 pytestmark = pytest.mark.ros
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,6 +89,8 @@ def test_simulation_orin_entrypoint(tmp_path):
         ActuatorPositionCommand, "/body/control/position", 1
     )
     sequence = [0]
+    standby_since = None
+    saw_standby = False
 
     def probe():
         sequence[0] += 1
@@ -148,9 +150,16 @@ def test_simulation_orin_entrypoint(tmp_path):
                     and heartbeats[-1].preflight_passed
                     and job.service_is_ready()
                 ):
-                    start_future = job.call_async(
-                        SupervisorJob.Request(name="policy", operation="start")
-                    )
+                    assert not actions and "catbot_policy" not in names
+                    assert not heartbeats[-1].policy_active
+                    assert not heartbeats[-1].degraded
+                    if standby_since is None:
+                        standby_since = time.monotonic()
+                    if time.monotonic() - standby_since >= 0.3:
+                        saw_standby = True
+                        start_future = job.call_async(
+                            SupervisorJob.Request(name="policy", operation="start")
+                        )
                 if start_future is not None and start_future.done():
                     assert start_future.result().success, start_future.result().message
                 if (
@@ -172,6 +181,9 @@ def test_simulation_orin_entrypoint(tmp_path):
                     break
                 assert process.poll() is None, log.read_text()
             assert contracts and actions, log.read_text()
+            assert saw_standby, (
+                "Launch did not wait for an explicit policy start request"
+            )
             assert heartbeats[-1].policy_ready and heartbeats[-1].policy_verified
             assert heartbeats[-1].bundle_id == fixture["metadata"]["policy_sha256"]
             assert telemetry and telemetry[-1].scenario == "simulation_orin"
