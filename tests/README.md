@@ -5,8 +5,10 @@ for pure scenario helpers, randomized settings validation, mapping contract and
 real subprocess supervision checks. CI also runs Catbot's behavioral and policy
 suites from the pinned submodule and enforces its per-file coverage floors.
 
-The ROS job builds `catbot_interfaces`, `catbot_policy`, `catbot_sim`, and
-`catbot_launcher`, then runs `pytest -m ros tests/test_ros_scenario.py` with pytest
+The ROS job uses normal colcon discovery to build the workspace, including the
+shared packages linked from `src/` into the pinned Catbot source. It checks that
+colcon discovers exactly one copy of each shared package at its `src/` path,
+then runs `pytest -m ros tests/test_ros_scenario.py` with pytest
 plugin autoload disabled. It launches the real `simulation_orin.launch.py` entry
 point with camera/Foxglove disabled and the shared stdlib fake worker replacing
 both external workers. It requires both adapter nodes, `/policy/contract`, and

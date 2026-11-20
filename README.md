@@ -8,12 +8,19 @@ Foxglove bridge for remote diagnostics.
 ## Build
 
 ```bash
-cd /home/catbot/ROS/ros2_ws
+cd /home/catbot/projects/ros2_ws
+git submodule update --init external/Catbot external/catbot_sim_rollout
 source /opt/ros/humble/setup.bash
 rosdep install --from-paths src --ignore-src -r -y
 colcon build --symlink-install
 source install/setup.bash
 ```
+
+The shared ROS packages under `src/` link to the single pinned source copy in
+`external/Catbot`. Normal `colcon build` discovers them once; use it instead of
+passing `external/Catbot` paths through `--base-paths`. See the
+[scenario build instructions](docs/SIMULATION.md#one-policy-implementation-on-either-machine)
+for the one-time cleanup when upgrading an existing workspace.
 
 ## Launch
 

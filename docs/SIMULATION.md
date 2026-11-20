@@ -185,22 +185,43 @@ a warning because uncommitted training code cannot be recovered from the SHA.
 
 ## One policy implementation on either machine
 
-Orin's `src/catbot_policy/catbot_policy` is a symlink to the pinned
-`external/Catbot/src/catbot_policy/catbot_policy` source. Its lightweight ament
-wrapper installs that source without requiring foundation/CAN on Orin. No policy
-logic is copied. The Pi uses the same package in Catbot. Keep Pi deployment and
-Orin's Catbot gitlink aligned when changing policy interfaces.
+Orin's `src/catbot_interfaces`, `src/catbot_policy`, `src/foundation`, and
+`src/catbot_supervisor` are package-directory symlinks into the pinned
+`external/Catbot/src` tree. The copied interface definitions and policy packaging
+wrapper have been removed. Normal colcon discovery builds each package once,
+using the same source paths as CI. Foundation is installed for supervisor imports;
+building it does not start hardware or install the separate inference workers.
+The Pi uses the same packages in Catbot. Keep Pi deployment and Orin's Catbot
+gitlink aligned when changing policy interfaces.
 
 ```bash
 git submodule update --init external/Catbot external/catbot_sim_rollout
 # On Orin: install locked simulator/kinematics dependencies in separate Python 3.14
 uv sync --locked --project external/catbot_sim_rollout
 source /opt/ros/humble/setup.bash
-colcon build --symlink-install --packages-select catbot_interfaces catbot_policy catbot_sim catbot_launcher
+colcon build --symlink-install
 source install/setup.bash
 ```
 
-`external/COLCON_IGNORE` prevents colcon traversing either external project.
+`external/COLCON_IGNORE` prevents a second recursive discovery of the external
+projects; the `src/` links expose only the required shared ROS packages. Always
+build from this workspace root instead of selecting the external paths with
+`--base-paths`.
+
+When upgrading an existing workspace that was built using the external paths,
+clear the interfaces' generated build directory once before rebuilding:
+
+```bash
+rm -rf build/catbot_interfaces
+colcon build --symlink-install
+source install/setup.bash
+```
+
+This directory contains generated CMake/interface build files. Removing it lets
+CMake configure against `src/catbot_interfaces`; policy artifacts, simulator
+environments and installed packages are preserved. Subsequent builds use plain
+`colcon build --symlink-install` with the same source paths.
+
 Install the ROS package dependencies, including `nav_msgs`, `sensor_msgs`,
 `tf2_ros`, `visualization_msgs`, and Python YAML. The ROS adapter requires no
 PyTorch installation. Its interpreter must match ROS Humble's Python ABI and see

@@ -9,6 +9,12 @@ contract. It is separate from a sibling `catbot` checkout. Inspect nested status
 and gitlinks before editing or updating submodules; preserve existing edits.
 CI checks out the gitlink commit, not the submodule's configured branch tip.
 
+`src/catbot_interfaces`, `src/catbot_policy`, `src/foundation`, and
+`src/catbot_supervisor` link to those packages in `external/Catbot`. Keep one
+source copy and use normal colcon discovery from this workspace root in both
+deployment and CI. Do not bypass these links with external `--base-paths` in a
+shared build directory: CMake caches the source path, including this choice.
+
 `external/catbot_sim_rollout` is a separately pinned simulation worker whose uv
 dependency pins a training revision. It does not automatically use the sibling
 `catbot_mujoco` working tree. Check the worker and policy/run artifacts actually

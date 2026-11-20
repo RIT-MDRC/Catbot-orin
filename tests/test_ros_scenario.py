@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 import rclpy
-from catbot_interfaces.srv import GetSupervisorStatus, SupervisorJob
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 from nav_msgs.msg import Odometry
 from rclpy.qos import DurabilityPolicy, QoSProfile
@@ -29,10 +28,33 @@ from catbot_interfaces.msg import (
     PolicyMetrics,
     PolicyReady,
 )
+from catbot_interfaces.srv import GetSupervisorStatus, SupervisorJob
 
 pytestmark = pytest.mark.ros
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "external/Catbot/tests/fixtures"
+
+
+def test_colcon_discovers_one_copy_of_each_shared_package(tmp_path):
+    output = subprocess.check_output(
+        ["colcon", "--log-base", str(tmp_path / "colcon-log"), "list"],
+        cwd=ROOT,
+        text=True,
+    )
+    packages = {}
+    for line in output.splitlines():
+        name, path, _ = line.split("\t")
+        packages.setdefault(name, []).append(path)
+    for name in (
+        "catbot_interfaces",
+        "catbot_policy",
+        "foundation",
+        "catbot_supervisor",
+    ):
+        assert len(packages.get(name, [])) == 1, output
+        source = ROOT / packages[name][0]
+        assert source.absolute() == ROOT / "src" / name
+        assert source.resolve() == ROOT / "external/Catbot/src" / name
 
 
 @pytest.mark.parametrize("scenario", ["simulation_orin", "physical_orin"])
