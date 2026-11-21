@@ -53,5 +53,7 @@ the existing process-group tests cover lease expiry and descendant cleanup.
 The ROS mount test uses a vertical, downward-tilted camera, an independent factory
 IMU rotation, and a nonzero lever arm. It checks body pose/velocity, refuses
 missing IMU TF, and resolves the native cloud frame against the model body frame
-through their common odometry root. Mount inputs are explicit test values;
+through their common gravity-aligned map root. It covers camera-aligned and
+gravity-aligned odometry origins, requires map-to-odom TF, and preserves real
+body tilt while correcting the reference axes. Mount inputs are explicit test values;
 deployment offsets can be tuned without changing the test.

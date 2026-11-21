@@ -419,15 +419,25 @@ ros2 launch catbot_launcher physical_orin.launch.py \
 
 Base position, tilt, heading-frame velocity and body angular velocity use these
 transforms, including the camera lever-arm velocity correction. The model TF
-uses the corrected body pose. The ZED remains the sole publisher of
-`odom -> zed_camera_link`; both camera/cloud frames and `robot/world` share that
-odom root. Do not add a second `body -> zed_camera_link` TF, which would give the
-camera conflicting parents. The body-to-camera transform is already available
-through the common odom ancestor. This lets Foxglove align `/body/model` and the
+uses the corrected body pose. `world_frame:=map` selects ZED's gravity-aligned
+map as the reference for body position, orientation, velocity and the ground
+plane. The bridge transforms each odometry pose at its message timestamp through
+`map -> odom` before applying the mount correction. ZED initializes local odom
+at the camera's starting pose, so its axes can be rolled/pitched with the mount;
+treating those axes as gravity-aligned would lay the body on its side. Missing
+map-to-odom TF prevents feedback until that transform is available. The ZED
+profile explicitly enables `set_gravity_as_origin`.
+
+The ZED remains the sole publisher of `odom -> zed_camera_link`; camera/cloud
+frames and `robot/world` share the gravity-aligned map root. Do not add a second
+`body -> zed_camera_link` TF, which would give the camera conflicting parents.
+The body-to-camera transform is already available
+through the common map ancestor. This lets Foxglove align `/body/model` and the
 native point cloud while preserving all ZED internal transforms.
 
-`ground_height_offset` aligns odometry's vertical origin to the ground plane;
-0.35 m is a standing-height starting assumption. It is added to odometry Z after
+`ground_height_offset` aligns the selected world reference's vertical origin to
+the ground plane; 0.35 m is a standing-height starting assumption. It is added to
+world-frame Z after
 the mount correction. Calibrate this for the actual startup origin/terrain.
 `estimate_contacts:=true` permits flat-ground geometric contact estimates when a
 fresh contact topic is absent: foot sphere bottoms within `contact_height` (0.02 m)
@@ -454,9 +464,12 @@ hardware behavior. The physical adapter never synthesizes encoder readiness.
 
 Connect to `ws://<orin-ip>:8765`, add a 3D panel and enable `/body/model`.
 For simulations select `sim/world`. For physical scenarios select `robot/world`
-or the camera's map/odom root: `robot/world` is connected below the received odom
-frame using the configured ground-height offset. Body transforms are derived
-from measured encoders and base pose, never merely the commanded targets.
+as the 3D panel's fixed frame (or `map` to use the camera's gravity-aligned root).
+`robot/world` is connected below `world_frame` using the configured ground-height
+offset. Use `world_frame:=your_map_frame` with a custom ZED map frame name; an
+empty value retains the received odometry frame for an already gravity-aligned
+non-ZED source. Body transforms are derived from measured encoders and base pose,
+never merely the commanded targets.
 
 The saved model provides primitive geometry and colors; capsules are rendered
 with cylinders and spheres. Infinite ground is shown as a finite patch. Textures

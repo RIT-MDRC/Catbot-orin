@@ -63,8 +63,9 @@ def test_colcon_discovers_one_copy_of_each_shared_package(tmp_path):
         assert source.resolve() == ROOT / "external/Catbot/src" / name
 
 
-def test_vertical_camera_mount_aligns_body_cloud_and_factory_imu():
-    from catbot_sim.physical import PhysicalInputs
+@pytest.mark.parametrize("camera_aligned_odom", [False, True])
+def test_vertical_camera_mount_aligns_body_cloud_and_factory_imu(camera_aligned_odom):
+    from catbot_sim.physical import PhysicalInputs, inverse, multiply
     from catbot_sim.visualization import ScenePublisher
 
     # Right lens on top, pitched down 30 degrees; explicit inputs, independent
@@ -84,6 +85,7 @@ def test_vertical_camera_mount_aligns_body_cloud_and_factory_imu():
             Parameter("body_from_camera_wxyz", value=mount),
             Parameter("body_to_camera_xyz", value=[0.3, 0.0, -0.03]),
             Parameter("imu_mount_from_tf", value=True),
+            Parameter("world_frame", value="mount/map"),
             Parameter("ground_height_offset", value=0.35),
             Parameter("imu_includes_gravity", value=False),
         ],
@@ -110,7 +112,22 @@ def test_vertical_camera_mount_aligns_body_cloud_and_factory_imu():
             ) = quaternion
             return message
 
-        camera = transform("mount/odom", "mount/camera", [1.3, 2.0, -0.03], mount)
+        # ZED's local odom starts at the tilted camera: identity odom->camera
+        # while map->odom supplies the gravity alignment. Also exercise an
+        # already gravity-aligned odom source.
+        odom_rotation = mount if camera_aligned_odom else [1.0, 0.0, 0.0, 0.0]
+        camera_rotation = [1.0, 0.0, 0.0, 0.0] if camera_aligned_odom else mount
+        camera_position = (
+            [0.9 * c + 0.13 * s, -0.9 * s + 0.13 * c, 2.2]
+            if camera_aligned_odom
+            else [0.9, 2.2, -0.13]
+        )
+        world_odom = transform(
+            "mount/map", "mount/odom", [0.4, -0.2, 0.1], odom_rotation
+        )
+        camera = transform(
+            "mount/odom", "mount/camera", camera_position, camera_rotation
+        )
         cloud = transform(
             "mount/camera", "mount/cloud", [0.0, 0.04, 0.0], [1.0, 0.0, 0.0, 0.0]
         )
@@ -122,7 +139,7 @@ def test_vertical_camera_mount_aligns_body_cloud_and_factory_imu():
                 rclpy.spin_once(node, timeout_sec=0.01)
             assert predicate()
 
-        def sample():
+        def sample(orientation=None):
             stamp = node.get_clock().now().to_msg()
             imu, odom = Imu(), Odometry()
             imu.header.stamp = odom.header.stamp = stamp
@@ -135,13 +152,13 @@ def test_vertical_camera_mount_aligns_body_cloud_and_factory_imu():
                 odom.pose.pose.position.x,
                 odom.pose.pose.position.y,
                 odom.pose.pose.position.z,
-            ) = [1.3, 2.0, -0.03]
+            ) = camera_position
             (
                 odom.pose.pose.orientation.w,
                 odom.pose.pose.orientation.x,
                 odom.pose.pose.orientation.y,
                 odom.pose.pose.orientation.z,
-            ) = mount
+            ) = camera_rotation if orientation is None else orientation
             (
                 odom.twist.twist.linear.x,
                 odom.twist.twist.linear.y,
@@ -165,12 +182,15 @@ def test_vertical_camera_mount_aligns_body_cloud_and_factory_imu():
         )
         assert (
             sample() is None
-        )  # Missing factory calibration must not silently use identity.
+        )  # Missing gravity alignment must not silently use identity.
+        native_tf.sendTransform([camera, cloud, world_odom])
+        until(lambda: inputs.tf_buffer.can_transform("mount/map", "mount/odom", Time()))
+        assert sample() is None  # Factory IMU calibration is still required.
         h = math.sqrt(0.5)
         imu_tf = transform(
             "mount/camera", "mount/imu", [0.0, 0.0, 0.0], [h, 0.0, 0.0, h]
         )
-        native_tf.sendTransform([camera, cloud, imu_tf])
+        native_tf.sendTransform([camera, cloud, world_odom, imu_tf])
         until(
             lambda: inputs.tf_buffer.can_transform("mount/camera", "mount/imu", Time())
         )
@@ -212,6 +232,22 @@ def test_vertical_camera_mount_aligns_body_cloud_and_factory_imu():
             result.rotation.y,
             result.rotation.z,
         ] == pytest.approx(mount)
+        # Correcting the world frame must still preserve real body roll.
+        body_roll = [math.cos(math.radians(10)), math.sin(math.radians(10)), 0.0, 0.0]
+        tilted_camera = multiply(inverse(odom_rotation), multiply(body_roll, mount))
+        tilted = sample(tilted_camera)
+        assert tilted is not None
+        assert tilted["qpos"][3:7] == pytest.approx(body_roll)
+        frame = inputs.tf_buffer.lookup_transform(
+            "mount/map", "robot/world", Time()
+        ).transform
+        assert [
+            frame.rotation.w,
+            frame.rotation.x,
+            frame.rotation.y,
+            frame.rotation.z,
+        ] == pytest.approx([1.0, 0.0, 0.0, 0.0])
+        assert frame.translation.z == pytest.approx(-0.35)
     finally:
         node.destroy_node()
         rclpy.shutdown()
@@ -249,6 +285,7 @@ def test_orin_entrypoint(tmp_path, scenario, start_pi):
         f"enable_diagnostics:={str(simulation).lower()}",
         "imu_topic:=/test/imu",
         "odom_topic:=/test/odom",
+        "world_frame:=test/world",
         "imu_mount_from_tf:=false",
         "body_from_camera_wxyz:=[1.0,0.0,0.0,0.0]",
         "body_from_imu_wxyz:=[1.0,0.0,0.0,0.0]",

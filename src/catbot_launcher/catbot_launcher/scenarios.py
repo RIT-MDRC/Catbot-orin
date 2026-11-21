@@ -37,6 +37,7 @@ BRIDGE_KEYS = (
     "estimate_contacts",
     "body_from_camera_wxyz",
     "body_from_imu_wxyz",
+    "world_frame",
     "imu_mount_from_tf",
     "body_to_camera_xyz",
     "imu_includes_gravity",
@@ -134,6 +135,7 @@ def build_launch(default_scenario="physical_orin"):
     )
     defaults.setdefault("remote_network_interface", "eth0")
     defaults.setdefault("imu_mount_from_tf", True)
+    defaults.setdefault("world_frame", "map")
     declarations = [
         DeclareLaunchArgument(
             "scenario", default_value=default_scenario, choices=list(SCENARIOS)
