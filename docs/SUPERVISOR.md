@@ -54,6 +54,12 @@ discovery settings. Then choose operations in Foxglove:
   and arms `fla, fra`. Each homing group must fully return to IDLE before arming;
   the sequence ends in local holding with policy forwarding disabled. See the
   pinned Catbot supervisor README for the completion checks and timeouts.
+  Script arming requests closed loop (state 8) only and confirms readiness; it
+  does not write trajectory limits, controller modes, or a hold-position target.
+  Explicit position moves select position/trapezoidal mode and enter closed loop
+  automatically, preserving speed/acceleration limits. Policy forwarding still
+  requires the separate RUN request. Emergency latches Foundation move/arm
+  commands until the Pi's explicit recovery confirms idle and clears the latch.
 - **Start policy (no motor commands)** requests only the Orin `policy` job.
   It does not run any robot script, clear faults, home or arm motors.
 - **RUN — ENABLE POLICY MOTION** is a separate explicit request after the motors
