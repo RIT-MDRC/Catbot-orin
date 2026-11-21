@@ -46,10 +46,12 @@ startup_timeout: 120.0
 sensor_timeout: 0.25
 sensor_max_skew: 0.1
 ground_height_offset: 0.35
-# Measured vertically from the center between the lenses to the floor. The first
-# valid camera pose anchors the world ground plane; later motion keeps it fixed.
-# Set to 0 to use ground_height_offset directly instead.
-camera_ground_height: 0.43
+# Fit depth while the policy is stopped and use the same ground for model TF and
+# policy height. The first reliable plane is required before publishing feedback.
+estimate_ground_from_depth: true
+# Optional tape-measure override; disable depth grounding before enabling this.
+# Zero uses depth for camera mount calibration as well.
+camera_ground_height: 0.0
 camera_height_frame: '{camera_name}_camera_center'
 contact_height: 0.02
 estimate_contacts: true

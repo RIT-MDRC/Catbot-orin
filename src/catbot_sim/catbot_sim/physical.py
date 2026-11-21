@@ -1,14 +1,15 @@
 """Fresh camera/encoder snapshots in the policy's model coordinate system."""
 
+import json
 import math
 import time
 
-from geometry_msgs.msg import TransformStamped, Vector3Stamped
+from geometry_msgs.msg import PoseStamped, TransformStamped, Vector3Stamped
 from nav_msgs.msg import Odometry
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
 from rclpy.time import Time
-from sensor_msgs.msg import Imu
-from std_msgs.msg import UInt8MultiArray
+from sensor_msgs.msg import CameraInfo, Image, Imu
+from std_msgs.msg import String, UInt8MultiArray
 from tf2_ros import (
     Buffer,
     StaticTransformBroadcaster,
@@ -17,6 +18,7 @@ from tf2_ros import (
 )
 
 from catbot_interfaces.msg import BodyKinematicState
+from catbot_sim.ground import ground_reference, ground_updates_allowed
 
 
 def multiply(a, b):
@@ -58,6 +60,9 @@ class PhysicalInputs:
         self.world_tf = StaticTransformBroadcaster(node)
         self.odom_frame = None
         self.last_snapshot = None
+        self.published_ground_height = None
+        self.last_ground_attempt = float("-inf")
+        self.ground_frozen = False
 
         def param(name, default):
             return node.declare_parameter(name, default).value
@@ -65,6 +70,8 @@ class PhysicalInputs:
         self.timeout = float(param("sensor_timeout", 0.25))
         self.skew = float(param("sensor_max_skew", 0.1))
         self.height = float(param("ground_height_offset", 0.35))
+        self.estimate_ground = bool(param("estimate_ground_from_depth", False))
+        self.ground_ready = not self.estimate_ground
         self.camera_ground_height = float(param("camera_ground_height", 0.0))
         self.camera_height_frame = str(param("camera_height_frame", ""))
         self.threshold = float(param("contact_height", 0.02))
@@ -77,7 +84,12 @@ class PhysicalInputs:
         )
         self.world_frame = str(param("world_frame", ""))
         self.imu_mount_from_tf = bool(param("imu_mount_from_tf", False))
-        if self.imu_mount_from_tf or self.world_frame or self.camera_ground_height > 0:
+        if (
+            self.imu_mount_from_tf
+            or self.world_frame
+            or self.camera_ground_height > 0
+            or self.estimate_ground
+        ):
             self.tf_buffer = Buffer()
             self.tf_listener = TransformListener(self.tf_buffer, node)
         self.camera_offset = list(param("body_to_camera_xyz", [0.0, 0.0, 0.0]))
@@ -98,12 +110,46 @@ class PhysicalInputs:
             or self.skew < 0
             or self.camera_ground_height < 0
             or (self.camera_ground_height > 0 and not self.camera_height_frame)
+            or (self.estimate_ground and self.camera_ground_height > 0)
             or len(self.camera_offset) != 3
         ):
             raise ValueError("Invalid physical sensor settings")
         self.acceleration = node.create_publisher(
             Vector3Stamped, "/body/state/linear_acceleration", 1
         )
+        if self.estimate_ground:
+            self.ground_status = node.create_publisher(
+                String, "/camera/ground/status", 1
+            )
+            self.ground_pose = node.create_publisher(
+                PoseStamped, "/camera/ground/reference", 1
+            )
+            for key, message, topic, qos in (
+                (
+                    "depth",
+                    Image,
+                    param("depth_topic", "/zed/zed_node/depth/depth_registered"),
+                    qos_profile_sensor_data,
+                ),
+                (
+                    "intrinsics",
+                    CameraInfo,
+                    param("camera_info_topic", "/zed/zed_node/depth/camera_info"),
+                    qos_profile_sensor_data,
+                ),
+                (
+                    "supervisor",
+                    String,
+                    "/rpi/supervisor/status",
+                    QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL),
+                ),
+            ):
+                node.create_subscription(
+                    message,
+                    str(topic),
+                    lambda msg, name=key: self.receive(name, msg),
+                    qos,
+                )
         for key, message, topic in (
             ("imu", Imu, param("imu_topic", "/zed/zed_node/imu/data")),
             ("odom", Odometry, param("odom_topic", "/zed/zed_node/odom")),
@@ -122,7 +168,12 @@ class PhysicalInputs:
             qos_profile_sensor_data,
         )
         node.get_logger().warning(
-            "Physical feedback requires calibrated camera/IMU mounting and ground_height_offset. "
+            "Physical feedback requires calibrated camera/IMU mounting. "
+            + (
+                "Ground height is estimated from depth. "
+                if self.estimate_ground
+                else "Ground height uses the configured startup reference. "
+            )
             + (
                 "Foot contact is estimated from flat-ground kinematics when no contact sample is available."
                 if self.estimate_contacts
@@ -133,6 +184,84 @@ class PhysicalInputs:
     def receive(self, name, message):
         with self.node.lock:
             self.samples[name] = (message, time.monotonic())
+
+    def update_ground(self, samples, odom, body_position, now):
+        """Update the same offset used by model TF and policy height, never during policy motion."""
+        allowed = False
+        if "supervisor" in samples:
+            try:
+                status, received = samples["supervisor"]
+                allowed = ground_updates_allowed(
+                    json.loads(status.data), now - received
+                )
+            except (ValueError, TypeError):
+                pass
+        if self.ground_ready and not allowed:
+            if not self.ground_frozen:
+                self.ground_status.publish(
+                    String(
+                        data=json.dumps(
+                            {
+                                "state": "frozen",
+                                "detail": "Policy active or stopped-state confirmation unavailable",
+                                "ground_world_z": -self.height,
+                            }
+                        )
+                    )
+                )
+                self.ground_frozen = True
+            return
+        self.ground_frozen = False
+        if now - self.last_ground_attempt < 0.5:
+            return
+        self.last_ground_attempt = now
+        try:
+            if any(
+                k not in samples or not 0 <= now - samples[k][1] <= self.timeout
+                for k in ("depth", "intrinsics")
+            ):
+                raise ValueError("Waiting for fresh depth and camera intrinsics")
+            image, info = samples["depth"][0], samples["intrinsics"][0]
+            stamps = [image.header.stamp, info.header.stamp, odom.header.stamp]
+            times = [s.sec + s.nanosec * 1e-9 for s in stamps]
+            ros_now = self.node.get_clock().now().nanoseconds * 1e-9
+            if (
+                any(
+                    t <= 0 or not -self.skew <= ros_now - t <= self.timeout
+                    for t in times
+                )
+                or max(times) - min(times) > self.skew
+            ):
+                raise ValueError("Depth and robot pose timestamps disagree")
+            frame = self.world_frame or odom.header.frame_id
+            transform = self.tf_buffer.lookup_transform(
+                frame, image.header.frame_id, Time.from_msg(image.header.stamp)
+            ).transform
+            q = transform.rotation
+            height, quality = ground_reference(
+                image,
+                info,
+                [q.w, q.x, q.y, q.z],
+                xyz(transform.translation),
+                body_position,
+            )
+            self.height, self.ground_ready = height, True
+            reference = PoseStamped()
+            reference.header.frame_id, reference.header.stamp = (
+                frame,
+                image.header.stamp,
+            )
+            reference.pose.position.x, reference.pose.position.y = body_position[:2]
+            reference.pose.position.z = -height
+            reference.pose.orientation.w = 1.0
+            self.ground_pose.publish(reference)
+            report = {"state": "tracking", "ground_world_z": -height, **quality}
+        except (TransformException, ValueError, KeyError, TypeError) as error:
+            report = {
+                "state": "holding" if self.ground_ready else "waiting",
+                "detail": str(error),
+            }
+        self.ground_status.publish(String(data=json.dumps(report, allow_nan=False)))
 
     def snapshot(self, command):
         now = time.monotonic()
@@ -195,36 +324,31 @@ class PhysicalInputs:
                 ]
         except (TransformException, ValueError):
             return None
-        if self.odom_frame is None:
-            if self.camera_ground_height > 0:
-                try:
-                    # The lens midpoint differs from the mounting link used by
-                    # odometry. Transform that measured point before anchoring.
-                    camera_to_measured = self.tf_buffer.lookup_transform(
-                        odom.child_frame_id,
-                        self.camera_height_frame,
-                        Time.from_msg(odom.header.stamp),
-                    ).transform.translation
-                except TransformException:
-                    return None
-                measured_offset = rotate(camera_q, xyz(camera_to_measured))
-                measured_world_z = camera_position[2] + measured_offset[2]
-                if not math.isfinite(measured_world_z):
-                    return None
-                self.height = self.camera_ground_height - measured_world_z
-                self.node.get_logger().info(
-                    f"Anchored ground from {self.camera_height_frame}: "
-                    f"camera height {self.camera_ground_height:.3f} m, "
-                    f"world height offset {self.height:.3f} m"
-                )
-            self.odom_frame = odom.header.frame_id
-            transform = TransformStamped()
-            transform.header.stamp = odom.header.stamp
-            transform.header.frame_id = self.world_frame or self.odom_frame
-            transform.child_frame_id = "robot/world"
-            transform.transform.translation.z = -self.height
-            transform.transform.rotation.w = 1.0
-            self.world_tf.sendTransform(transform)
+        if (
+            self.odom_frame is None
+            and not self.estimate_ground
+            and self.camera_ground_height > 0
+        ):
+            try:
+                # The lens midpoint differs from the mounting link used by
+                # odometry. Transform that measured point before anchoring.
+                camera_to_measured = self.tf_buffer.lookup_transform(
+                    odom.child_frame_id,
+                    self.camera_height_frame,
+                    Time.from_msg(odom.header.stamp),
+                ).transform.translation
+            except TransformException:
+                return None
+            measured_offset = rotate(camera_q, xyz(camera_to_measured))
+            measured_world_z = camera_position[2] + measured_offset[2]
+            if not math.isfinite(measured_world_z):
+                return None
+            self.height = self.camera_ground_height - measured_world_z
+            self.node.get_logger().info(
+                f"Anchored ground from {self.camera_height_frame}: "
+                f"camera height {self.camera_ground_height:.3f} m, "
+                f"world height offset {self.height:.3f} m"
+            )
         body_q = multiply(camera_q, inverse(self.camera_rotation))
         imu_rotation = self.imu_rotation
         if self.imu_mount_from_tf:
@@ -249,6 +373,10 @@ class PhysicalInputs:
                 return None
         offset_world = rotate(body_q, self.camera_offset)
         position = [p - o for p, o in zip(camera_position, offset_world, strict=True)]
+        if self.estimate_ground:
+            self.update_ground(samples, odom, position, now)
+            if not self.ground_ready:
+                return None
         position[2] += self.height
         angular = rotate(imu_rotation, xyz(imu.angular_velocity))
         # Odometry twist is in child_frame_id. Remove velocity due to the camera lever arm.
@@ -285,6 +413,16 @@ class PhysicalInputs:
             contacts = [bool(v) for v in values]
         elif not self.estimate_contacts:
             return None
+        if self.published_ground_height != self.height:
+            transform = TransformStamped()
+            transform.header.stamp = odom.header.stamp
+            transform.header.frame_id = self.world_frame or odom.header.frame_id
+            transform.child_frame_id = "robot/world"
+            transform.transform.translation.z = -self.height
+            transform.transform.rotation.w = 1.0
+            self.world_tf.sendTransform(transform)
+            self.published_ground_height = self.height
+        self.odom_frame = odom.header.frame_id
         if imu.linear_acceleration_covariance[0] >= 0:
             accel = rotate(imu_rotation, xyz(imu.linear_acceleration))
             if self.remove_gravity:

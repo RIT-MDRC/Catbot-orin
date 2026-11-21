@@ -3,7 +3,8 @@
 The physical Orin scenario provides `/camera/calibration/start`, `/cancel`, and
 `/save` services (all `std_srvs/srv/Trigger`). It never commands motors or starts
 the policy. `enable_camera_calibration:=false` disables this feature.
-Depth-image subscriptions exist only while a capture is collecting.
+The calibration node subscribes to depth only while collecting. The physical
+bridge also uses depth for the live ground reference described below.
 
 This calibration compares the floor observed by the depth camera with the plane
 predicted from all four feet using the selected saved model and Foundation joint
@@ -13,15 +14,40 @@ the floor or rotation about its normal. Measure X/Y and heading separately; thos
 values are retained, not silently treated as calibrated.
 
 The quantity being calibrated is the camera's **mounting height relative to the
-torso/body origin**, not its distance to the floor. The standing feet and leg
-angles establish body-to-floor height. The supplied camera-center-to-floor
-measurement (currently 0.43 m) establishes the other height; comparing the two
-solves the mounting Z, including body tilt and the factory camera-center offset.
-For a level body this is simply camera-ground height minus body-ground height.
-The depth plane still supplies orientation and a separate distance cross-check.
-With `camera_ground_height:=0.0`, depth supplies the distance instead. The report
-labels `height_source`, `measured_point_height_m` and `depth_camera_height_m`.
-Use the tape measurement only while the robot remains in the measured stance.
+body origin**, not its distance to the floor. The standing feet and joint angles
+establish body-to-floor height. Depth establishes camera-to-floor height; comparing
+the two solves the mounting Z, accounting for body tilt. A tape measurement is
+not required. The default `camera_ground_height` is zero, selecting depth.
+
+## Live model-ground alignment
+
+`estimate_ground_from_depth:=true` connects the detected floor to both
+`map -> robot/world` and the policy's base-height calculation. The first reliable
+depth plane is required before physical feedback is published. While the Pi
+confirms the policy is stopped and no script is running, the bridge refines the
+reference at up to 2 Hz. This includes moving the gray model floor when the depth
+floor changes relative to the tracking origin. The same height correction is
+applied to the robot pose, so TF and feedback remain consistent.
+
+`/camera/ground/reference` is a typed `PoseStamped` for the horizontal model floor
+under the body, in the gravity-aligned world frame. `/camera/ground/status` reports
+`tracking`, `waiting`, `holding` (last valid floor retained after a rejected depth
+sample), or `frozen`. Once initialized, the reference is frozen while policy is
+active or stopped-state confirmation is unavailable. Invalid or stale depth
+never replaces a valid floor. Calibration preview/save controls the mount;
+background ground alignment does not require saving a mount or restarting after
+each detection.
+
+The current model/contact estimator assumes approximately level ground. The
+fitter rejects walls and steep surfaces and preserves gravity-aligned axes; it
+sets the horizontal floor height at the body's position rather than rotating the
+policy's world frame to match a ramp. This is not a terrain map or force sensor.
+
+An optional measured override remains available: disable depth grounding with
+`estimate_ground_from_depth:=false` and set a positive `camera_ground_height` at
+`camera_height_frame`. A single measurement establishes the reference once at
+startup and is also used for mount calibration. With both depth grounding and the
+measurement disabled, `ground_height_offset` supplies the legacy fixed reference.
 
 ## Operator procedure
 
@@ -88,21 +114,10 @@ poor consensus and large corrections. Sample variation above 0.5 degree tilt or
 guarantee: wrong joint zeros, flex, backlash or leg dimensions bias the result.
 
 The report includes `ground_height_offset_at_capture`, the vertical correction
-for the **current** world/tracking origin. It is not loaded as a permanent mount
-parameter: restarting tracking changes that origin. The existing
-`camera_ground_height` launch setting defaults to the measured **0.43 m**, from
-the midpoint between the lenses (`zed_camera_center`) vertically to the floor.
-At the first valid physical snapshot, this point's world Z is used to establish
-the ground plane: `ground_height_offset = camera_ground_height - camera_world_z`.
-Both the model TF and policy height use that same offset. Stand the robot at the
-measured camera height before starting the physical scenario. Later motion does
-not re-anchor the ground or force the camera to remain at 0.43 m. The camera's
-factory center-to-mount transform is included; this is not a body-height or mount
-Z setting. `camera_height_frame` selects a different measured reference point.
-Set `camera_ground_height:=0.0` to use `ground_height_offset` directly instead.
-This feature does not add
-a continuous terrain/height estimator, measure foot force, change policy inputs,
-or reset/rotate the gravity-aligned world to match the floor.
+for that world/tracking origin. It is not saved as a permanent mount parameter;
+the live depth reference handles current ground alignment independently. This
+feature does not reset camera tracking or command any actuator. Saved mount
+corrections still require explicitly loading the calibration file on launch.
 
 For complete six-degree camera placement, add a surveyed target or deliberately
 varied known poses with enough independent plane orientations and a separate

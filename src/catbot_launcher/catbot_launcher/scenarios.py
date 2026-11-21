@@ -33,6 +33,9 @@ BRIDGE_KEYS = (
     "sensor_timeout",
     "sensor_max_skew",
     "ground_height_offset",
+    "estimate_ground_from_depth",
+    "depth_topic",
+    "camera_info_topic",
     "camera_ground_height",
     "camera_height_frame",
     "contact_height",
@@ -139,6 +142,7 @@ def build_launch(default_scenario="physical_orin"):
     defaults.setdefault("imu_mount_from_tf", True)
     defaults.setdefault("world_frame", "map")
     defaults.setdefault("camera_ground_height", 0.0)
+    defaults.setdefault("estimate_ground_from_depth", False)
     defaults.setdefault("camera_height_frame", "{camera_name}_camera_center")
     defaults.setdefault("enable_camera_calibration", True)
     defaults.setdefault("camera_calibration_file", "")

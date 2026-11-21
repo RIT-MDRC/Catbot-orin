@@ -64,3 +64,9 @@ depth decoding and atomic calibration files. `test_ros_camera_calibration.py`
 exercises the real ROS start/preview/save/cancel flow with synthetic depth, TF,
 encoder and supervisor publishers, including policy/fault/motion interlocks.
 It is required in the ROS CI job and does not contact physical hardware.
+
+`test_ground.py` verifies that camera motion/depth recover the same world floor
+without a manual height, rejects invalid depth and checks stopped-state gating.
+The ROS scenario suite also verifies that depth reference changes update model
+TF and body-height feedback together, freeze during policy operation, and retain
+the previous reference after rejected depth.

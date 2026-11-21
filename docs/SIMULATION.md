@@ -435,16 +435,17 @@ The body-to-camera transform is already available
 through the common map ancestor. This lets Foxglove align `/body/model` and the
 native point cloud while preserving all ZED internal transforms.
 
-`camera_ground_height` is the measured vertical distance from
-`camera_height_frame` to the floor: currently **0.43 m** at `zed_camera_center`,
-the midpoint between the lenses. The first valid physical pose converts this
-measurement to a world ground offset, including the factory camera-frame
-translation, and anchors the model plane there. Later camera/body motion does
-not move that ground reference. Start the scenario with the robot in the stance
-where the measurement was taken. `camera_ground_height:=0.0` instead uses
-`ground_height_offset` directly as the world-origin-to-ground correction.
-Neither setting is the camera's body-relative mounting Z; the four-foot camera
-calibration estimates that separately from the standing leg geometry.
+`estimate_ground_from_depth:=true` fits the depth floor and applies its height
+beneath the body to both `robot/world` TF and policy feedback. It waits for an
+initial reliable plane, then refines it at up to 2 Hz while the Pi confirms policy
+is stopped and no script is active. It freezes the established reference during
+policy operation and holds the last valid value when depth is rejected. Inspect
+`/camera/ground/reference` and `/camera/ground/status`. No 43 cm input is required:
+`camera_ground_height` defaults to zero so mount calibration also measures height
+from depth. For an optional tape-measure reference, disable depth grounding and
+set `camera_ground_height` at `camera_height_frame`. With both disabled,
+`ground_height_offset` is a fixed fallback. The floor remains horizontal in the
+gravity-aligned world, consistent with the current flat-ground contact model.
 `estimate_contacts:=true` permits flat-ground geometric contact estimates when a
 fresh contact topic is absent: foot sphere bottoms within `contact_height` (0.02 m)
 of that plane count as contact. Use `estimate_contacts:=false` to require measured

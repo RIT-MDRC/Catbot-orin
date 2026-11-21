@@ -282,6 +282,153 @@ def test_vertical_camera_mount_aligns_body_cloud_and_factory_imu(
         rclpy.shutdown()
 
 
+def test_depth_floor_updates_model_tf_and_feedback_and_freezes_during_policy():
+    import numpy as np
+    from catbot_sim.physical import PhysicalInputs
+    from sensor_msgs.msg import CameraInfo, Image
+
+    mapping = json.loads((FIXTURES / "contract.json").read_text())["mapping"]
+    rclpy.init()
+    node = rclpy.create_node(
+        "depth_floor_test",
+        parameter_overrides=[
+            Parameter("estimate_ground_from_depth", value=True),
+            Parameter("world_frame", value="depth/map"),
+            Parameter("body_from_camera_wxyz", value=[0.0, 1.0, 0.0, 0.0]),
+            Parameter("body_to_camera_xyz", value=[0.1, 0.0, 0.05]),
+            Parameter("imu_includes_gravity", value=False),
+        ],
+    )
+    node.lock = threading.Lock()
+    inputs = PhysicalInputs(node, mapping)
+    broadcaster = StaticTransformBroadcaster(node)
+
+    def spin_until(predicate):
+        deadline = time.monotonic() + 3
+        while not predicate() and time.monotonic() < deadline:
+            rclpy.spin_once(node, timeout_sec=0.01)
+        assert predicate()
+
+    def sample(camera_z, distance, active=False, include_depth=True):
+        tf = TransformStamped()
+        tf.header.stamp = node.get_clock().now().to_msg()
+        tf.header.frame_id = "depth/map"
+        tf.child_frame_id = "depth/optical"
+        tf.transform.translation.x = 0.1
+        tf.transform.translation.z = camera_z
+        tf.transform.rotation.x = 1.0
+        tf.transform.rotation.w = 0.0
+        broadcaster.sendTransform(tf)
+        spin_until(
+            lambda: inputs.tf_buffer.can_transform("depth/map", "depth/optical", Time())
+        )
+        # Wait for the replacement static pose, not just the existing frame.
+        spin_until(
+            lambda: (
+                abs(
+                    inputs.tf_buffer.lookup_transform(
+                        "depth/map", "depth/optical", Time()
+                    ).transform.translation.z
+                    - camera_z
+                )
+                < 1e-6
+            )
+        )
+        stamp = node.get_clock().now().to_msg()
+        imu = Imu()
+        imu.header.stamp = stamp
+        odom = Odometry()
+        odom.header.stamp = stamp
+        odom.header.frame_id = "depth/map"
+        odom.child_frame_id = "depth/optical"
+        odom.pose.pose.position.x = 0.1
+        odom.pose.pose.position.z = camera_z
+        odom.pose.pose.orientation.x = 1.0
+        odom.pose.pose.orientation.w = 0.0
+        joints = BodyKinematicState(
+            stamp=stamp,
+            actuators=[
+                ActuatorKinematicState(actuator_name=n, valid=True)
+                for n in mapping["actuator_names"]
+            ],
+        )
+        for key, msg in (("imu", imu), ("odom", odom), ("joints", joints)):
+            inputs.receive(key, msg)
+        inputs.receive(
+            "supervisor",
+            String(
+                data=json.dumps(
+                    {
+                        "mode": "running" if active else "holding",
+                        "orin_policy_active": active,
+                        "script": "",
+                    }
+                )
+            ),
+        )
+        if include_depth:
+            image = Image()
+            image.header.stamp = stamp
+            image.header.frame_id = "depth/optical"
+            image.width = image.height = 128
+            image.step = 512
+            image.encoding = "32FC1"
+            image.data = np.full((128, 128), distance, dtype="<f4").tobytes()
+            info = CameraInfo()
+            info.header = image.header
+            info.width = info.height = 128
+            info.p = [100.0, 0.0, 64.0, 0.0, 0.0, 100.0, 64.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+            inputs.receive("depth", image)
+            inputs.receive("intrinsics", info)
+        return inputs.snapshot([0.0, 0.0, 0.0])
+
+    def floor_z():
+        spin_until(
+            lambda: inputs.tf_buffer.can_transform("depth/map", "robot/world", Time())
+        )
+        spin_until(
+            lambda: (
+                abs(
+                    inputs.tf_buffer.lookup_transform(
+                        "depth/map", "robot/world", Time()
+                    ).transform.translation.z
+                    + inputs.height
+                )
+                < 1e-6
+            )
+        )
+        return inputs.tf_buffer.lookup_transform(
+            "depth/map", "robot/world", Time()
+        ).transform.translation.z
+
+    try:
+        assert sample(0.13, 0.43, include_depth=False) is None
+        time.sleep(0.55)
+        first = sample(0.13, 0.43)
+        assert first is not None
+        assert first["qpos"][2] == pytest.approx(0.38, abs=1e-6)
+        assert floor_z() == pytest.approx(-0.30, abs=1e-6)
+        time.sleep(0.55)
+        shifted = sample(-0.07, 0.43)
+        assert shifted["qpos"][2] == pytest.approx(0.38, abs=1e-6)
+        assert floor_z() == pytest.approx(-0.50, abs=1e-6)
+        time.sleep(0.55)
+        running = sample(-0.17, 0.43, active=True)
+        assert running["qpos"][2] == pytest.approx(0.28, abs=1e-6)
+        assert floor_z() == pytest.approx(-0.50, abs=1e-6)
+        time.sleep(0.55)
+        stopped = sample(-0.17, 0.43)
+        assert stopped["qpos"][2] == pytest.approx(0.38, abs=1e-6)
+        assert floor_z() == pytest.approx(-0.60, abs=1e-6)
+        time.sleep(0.55)
+        invalid = sample(-0.17, float("nan"))
+        assert invalid["qpos"][2] == pytest.approx(0.38, abs=1e-6)
+        assert floor_z() == pytest.approx(-0.60, abs=1e-6)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
 @pytest.mark.parametrize(
     ("scenario", "start_pi"),
     [("simulation_orin", False), ("physical_orin", False), ("physical_orin", True)],
@@ -323,6 +470,7 @@ def test_orin_entrypoint(tmp_path, scenario, start_pi):
         "body_from_imu_wxyz:=[1.0,0.0,0.0,0.0]",
         "body_to_camera_xyz:=[0.0,0.0,0.0]",
         "camera_ground_height:=0.0",
+        "estimate_ground_from_depth:=false",
         "orin_device:=cpu",
         "supervisor_git_commit:=test-commit",
         f"supervisor_resource_sys_root:={tmp_path / 'sys'}",
