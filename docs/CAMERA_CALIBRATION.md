@@ -12,6 +12,17 @@ existing X, Y and yaw. A single unmarked floor cannot identify translation along
 the floor or rotation about its normal. Measure X/Y and heading separately; those
 values are retained, not silently treated as calibrated.
 
+The quantity being calibrated is the camera's **mounting height relative to the
+torso/body origin**, not its distance to the floor. The standing feet and leg
+angles establish body-to-floor height. The supplied camera-center-to-floor
+measurement (currently 0.43 m) establishes the other height; comparing the two
+solves the mounting Z, including body tilt and the factory camera-center offset.
+For a level body this is simply camera-ground height minus body-ground height.
+The depth plane still supplies orientation and a separate distance cross-check.
+With `camera_ground_height:=0.0`, depth supplies the distance instead. The report
+labels `height_source`, `measured_point_height_m` and `depth_camera_height_m`.
+Use the tape measurement only while the robot remains in the measured stance.
+
 ## Operator procedure
 
 1. Verify joint homing/zeros and leg geometry. Put all four feet on one flat,
@@ -79,7 +90,17 @@ guarantee: wrong joint zeros, flex, backlash or leg dimensions bias the result.
 The report includes `ground_height_offset_at_capture`, the vertical correction
 for the **current** world/tracking origin. It is not loaded as a permanent mount
 parameter: restarting tracking changes that origin. The existing
-`ground_height_offset` launch setting remains in use. This feature does not add
+`camera_ground_height` launch setting defaults to the measured **0.43 m**, from
+the midpoint between the lenses (`zed_camera_center`) vertically to the floor.
+At the first valid physical snapshot, this point's world Z is used to establish
+the ground plane: `ground_height_offset = camera_ground_height - camera_world_z`.
+Both the model TF and policy height use that same offset. Stand the robot at the
+measured camera height before starting the physical scenario. Later motion does
+not re-anchor the ground or force the camera to remain at 0.43 m. The camera's
+factory center-to-mount transform is included; this is not a body-height or mount
+Z setting. `camera_height_frame` selects a different measured reference point.
+Set `camera_ground_height:=0.0` to use `ground_height_offset` directly instead.
+This feature does not add
 a continuous terrain/height estimator, measure foot force, change policy inputs,
 or reset/rotate the gravity-aligned world to match the floor.
 

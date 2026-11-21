@@ -24,6 +24,7 @@ from catbot_sim.camera_calibration import (
     fit_ground,
     foot_frames,
     foot_plane,
+    measured_plane_offset,
     rotation,
     save_calibration,
 )
@@ -56,6 +57,16 @@ class CameraCalibration(Node):
         self.prior_rotation = rotation(self.prior_q)
         self.camera_frame = str(param("camera_frame", "zed_camera_link"))
         self.world_frame = str(param("world_frame", "map"))
+        self.measured_height = float(param("camera_ground_height", 0.0))
+        self.height_frame = str(param("camera_height_frame", ""))
+        if (
+            not math.isfinite(self.measured_height)
+            or self.measured_height < 0
+            or (self.measured_height > 0 and not self.height_frame)
+        ):
+            raise ValueError(
+                "Measured camera height needs a finite nonnegative value and a reference frame"
+            )
         self.output = str(
             param(
                 "camera_calibration_output", "~/.config/catbot/camera_calibration.json"
@@ -288,9 +299,6 @@ class CameraCalibration(Node):
         normal, offset, quality = fit_ground(
             points, self.prior_rotation.T @ body_normal
         )
-        result = estimate_mount(
-            (normal, offset), (body_normal, body_offset), self.prior_q, self.prior_xyz
-        )
         world_rotation, world_position = transform_values(
             self.tf_buffer.lookup_transform(
                 self.world_frame, self.camera_frame, stamp
@@ -301,11 +309,29 @@ class CameraCalibration(Node):
             raise ValueError(
                 "Calibration requires a level floor in the gravity-aligned world frame"
             )
+        depth_height = float(offset / world_normal[2])
+        if self.measured_height > 0:
+            _, measured_point = transform_values(
+                self.tf_buffer.lookup_transform(
+                    self.camera_frame, self.height_frame, stamp
+                ).transform
+            )
+            offset = measured_plane_offset(
+                normal, world_rotation, measured_point, self.measured_height
+            )
+        result = estimate_mount(
+            (normal, offset), (body_normal, body_offset), self.prior_q, self.prior_xyz
+        )
         body_world = world_position - world_rotation @ rotation(
             result["body_from_camera_wxyz"]
         ).T @ np.array(result["body_to_camera_xyz"])
         result.update(quality)
         result.update(
+            height_source="measured" if self.measured_height > 0 else "depth",
+            measured_point_height_m=self.measured_height
+            if self.measured_height > 0
+            else None,
+            depth_camera_height_m=depth_height,
             camera_height_m=float(offset / world_normal[2]),
             body_height_m=float(body_offset / world_normal[2]),
             ground_height_offset_at_capture=float(
@@ -333,6 +359,7 @@ class CameraCalibration(Node):
         result["body_to_camera_xyz"] = [*self.prior_xyz[:2], float(np.median(heights))]
         for key in (
             "camera_height_m",
+            "depth_camera_height_m",
             "body_height_m",
             "ground_height_offset_at_capture",
             "rms_m",

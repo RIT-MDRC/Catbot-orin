@@ -64,7 +64,10 @@ def test_colcon_discovers_one_copy_of_each_shared_package(tmp_path):
 
 
 @pytest.mark.parametrize("camera_aligned_odom", [False, True])
-def test_vertical_camera_mount_aligns_body_cloud_and_factory_imu(camera_aligned_odom):
+@pytest.mark.parametrize("measured_camera_height", [False, True])
+def test_vertical_camera_mount_aligns_body_cloud_and_factory_imu(
+    camera_aligned_odom, measured_camera_height
+):
     from catbot_sim.physical import PhysicalInputs, inverse, multiply
     from catbot_sim.visualization import ScenePublisher
 
@@ -87,6 +90,10 @@ def test_vertical_camera_mount_aligns_body_cloud_and_factory_imu(camera_aligned_
             Parameter("imu_mount_from_tf", value=True),
             Parameter("world_frame", value="mount/map"),
             Parameter("ground_height_offset", value=0.35),
+            Parameter(
+                "camera_ground_height", value=0.43 if measured_camera_height else 0.0
+            ),
+            Parameter("camera_height_frame", value="mount/cloud"),
             Parameter("imu_includes_gravity", value=False),
         ],
     )
@@ -185,6 +192,11 @@ def test_vertical_camera_mount_aligns_body_cloud_and_factory_imu(camera_aligned_
         )  # Missing gravity alignment must not silently use identity.
         native_tf.sendTransform([camera, cloud, world_odom])
         until(lambda: inputs.tf_buffer.can_transform("mount/map", "mount/odom", Time()))
+        if measured_camera_height:
+            inputs.camera_height_frame = "mount/missing_center"
+            assert sample() is None
+            assert inputs.odom_frame is None
+            inputs.camera_height_frame = "mount/cloud"
         assert sample() is None  # Factory IMU calibration is still required.
         h = math.sqrt(0.5)
         imu_tf = transform(
@@ -196,7 +208,10 @@ def test_vertical_camera_mount_aligns_body_cloud_and_factory_imu(camera_aligned_
         )
         state = sample()
         assert state is not None
-        assert state["qpos"][:7] == pytest.approx([1.0, 2.0, 0.35, 1.0, 0.0, 0.0, 0.0])
+        expected_height = 0.43 + 0.03 + 0.04 * c if measured_camera_height else 0.35
+        assert state["qpos"][:7] == pytest.approx(
+            [1.0, 2.0, expected_height, 1.0, 0.0, 0.0, 0.0]
+        )
         assert state["qvel"][:6] == pytest.approx([0.2, 0.3, 0.0, 0.0, 0.0, 1.0])
         scene = {
             "bodies": [
@@ -247,7 +262,21 @@ def test_vertical_camera_mount_aligns_body_cloud_and_factory_imu(camera_aligned_
             frame.rotation.y,
             frame.rotation.z,
         ] == pytest.approx([1.0, 0.0, 0.0, 0.0])
-        assert frame.translation.z == pytest.approx(-0.35)
+        assert frame.translation.z == pytest.approx(-expected_height)
+        if measured_camera_height:
+            center = inputs.tf_buffer.lookup_transform(
+                "robot/world", "mount/cloud", Time()
+            ).transform
+            assert center.translation.z == pytest.approx(0.43)
+            # Measured height establishes the floor once; it must not pin the
+            # body at a constant height as odometry subsequently moves upward.
+            from catbot_sim.physical import rotate
+
+            upward = rotate(inverse(odom_rotation), [0.0, 0.0, 0.1])
+            camera_position[:] = [a + b for a, b in zip(camera_position, upward)]
+            moved = sample()
+            assert moved["qpos"][2] == pytest.approx(expected_height + 0.1)
+            assert inputs.height == pytest.approx(expected_height)
     finally:
         node.destroy_node()
         rclpy.shutdown()
@@ -293,6 +322,7 @@ def test_orin_entrypoint(tmp_path, scenario, start_pi):
         "body_from_camera_wxyz:=[1.0,0.0,0.0,0.0]",
         "body_from_imu_wxyz:=[1.0,0.0,0.0,0.0]",
         "body_to_camera_xyz:=[0.0,0.0,0.0]",
+        "camera_ground_height:=0.0",
         "orin_device:=cpu",
         "supervisor_git_commit:=test-commit",
         f"supervisor_resource_sys_root:={tmp_path / 'sys'}",

@@ -28,7 +28,10 @@ from catbot_interfaces.msg import (
 pytestmark = pytest.mark.ros
 
 
-def test_four_foot_calibration_service_preview_save_and_motion_rejection(tmp_path):
+@pytest.mark.parametrize("measured_height", [False, True])
+def test_four_foot_calibration_service_preview_save_and_motion_rejection(
+    tmp_path, measured_height
+):
     xml = (
         '<mujoco><worldbody><body name="quadruped">'
         + "".join(
@@ -52,6 +55,8 @@ def test_four_foot_calibration_service_preview_save_and_motion_rejection(tmp_pat
                 "body_to_camera_xyz": [0.4, 0.0, 0.02],
                 "camera_frame": "calibration/camera",
                 "world_frame": "calibration/world",
+                "camera_ground_height": 0.44 if measured_height else 0.0,
+                "camera_height_frame": "calibration/height_point",
                 "camera_calibration_output": str(output),
             }.items()
         ]
@@ -111,6 +116,13 @@ def test_four_foot_calibration_service_preview_save_and_motion_rejection(tmp_pat
     tf.transform.rotation.w = math.cos(math.radians(5))
     transforms.append(tf)
     frames.sendTransform(transforms)
+    tf = TransformStamped()
+    tf.header.frame_id = "calibration/camera"
+    tf.child_frame_id = "calibration/height_point"
+    tf.transform.translation.z = -0.04
+    tf.transform.rotation.w = 1.0
+    transforms.append(tf)
+    frames.sendTransform(transforms)
     state = {"policy": False, "velocity": 0.0, "encoder_fault": 0}
     received = {"mount": [], "heights": []}
     from geometry_msgs.msg import PoseStamped, Vector3Stamped
@@ -144,7 +156,10 @@ def test_four_foot_calibration_service_preview_save_and_motion_rejection(tmp_pat
             math.cos(math.radians(10))
             - math.sin(math.radians(10)) * (pixels_x - 48) / 100
         )
-        image.data = depth.astype("<f4").tobytes()
+        # A biased depth distance must not replace an explicit tape measurement.
+        image.data = (
+            (depth * (1.05 if measured_height else 1.0)).astype("<f4").tobytes()
+        )
         info = CameraInfo()
         info.header = image.header
         info.width = info.height = 96
@@ -224,6 +239,12 @@ def test_four_foot_calibration_service_preview_save_and_motion_rejection(tmp_pat
         assert node.result["ground_height_offset_at_capture"] == pytest.approx(
             0, abs=1e-5
         )
+        assert node.result["height_source"] == (
+            "measured" if measured_height else "depth"
+        )
+        if measured_height:
+            assert node.result["depth_camera_height_m"] > 0.42
+            assert node.result["measured_point_height_m"] == 0.44
         assert received["mount"] and received["heights"]
         assert received["mount"][-1].pose.position.z == pytest.approx(0.05, abs=1e-5)
         assert received["heights"][-1].vector.x == pytest.approx(0.4, abs=1e-5)

@@ -435,10 +435,16 @@ The body-to-camera transform is already available
 through the common map ancestor. This lets Foxglove align `/body/model` and the
 native point cloud while preserving all ZED internal transforms.
 
-`ground_height_offset` aligns the selected world reference's vertical origin to
-the ground plane; 0.35 m is a standing-height starting assumption. It is added to
-world-frame Z after
-the mount correction. Calibrate this for the actual startup origin/terrain.
+`camera_ground_height` is the measured vertical distance from
+`camera_height_frame` to the floor: currently **0.43 m** at `zed_camera_center`,
+the midpoint between the lenses. The first valid physical pose converts this
+measurement to a world ground offset, including the factory camera-frame
+translation, and anchors the model plane there. Later camera/body motion does
+not move that ground reference. Start the scenario with the robot in the stance
+where the measurement was taken. `camera_ground_height:=0.0` instead uses
+`ground_height_offset` directly as the world-origin-to-ground correction.
+Neither setting is the camera's body-relative mounting Z; the four-foot camera
+calibration estimates that separately from the standing leg geometry.
 `estimate_contacts:=true` permits flat-ground geometric contact estimates when a
 fresh contact topic is absent: foot sphere bottoms within `contact_height` (0.02 m)
 of that plane count as contact. Use `estimate_contacts:=false` to require measured

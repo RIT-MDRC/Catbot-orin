@@ -65,6 +65,8 @@ class PhysicalInputs:
         self.timeout = float(param("sensor_timeout", 0.25))
         self.skew = float(param("sensor_max_skew", 0.1))
         self.height = float(param("ground_height_offset", 0.35))
+        self.camera_ground_height = float(param("camera_ground_height", 0.0))
+        self.camera_height_frame = str(param("camera_height_frame", ""))
         self.threshold = float(param("contact_height", 0.02))
         self.estimate_contacts = bool(param("estimate_contacts", True))
         self.camera_rotation = normalized(
@@ -75,7 +77,7 @@ class PhysicalInputs:
         )
         self.world_frame = str(param("world_frame", ""))
         self.imu_mount_from_tf = bool(param("imu_mount_from_tf", False))
-        if self.imu_mount_from_tf or self.world_frame:
+        if self.imu_mount_from_tf or self.world_frame or self.camera_ground_height > 0:
             self.tf_buffer = Buffer()
             self.tf_listener = TransformListener(self.tf_buffer, node)
         self.camera_offset = list(param("body_to_camera_xyz", [0.0, 0.0, 0.0]))
@@ -87,12 +89,15 @@ class PhysicalInputs:
                     self.timeout,
                     self.skew,
                     self.height,
+                    self.camera_ground_height,
                     self.threshold,
                     *self.camera_offset,
                 ]
             )
             or self.timeout <= 0
             or self.skew < 0
+            or self.camera_ground_height < 0
+            or (self.camera_ground_height > 0 and not self.camera_height_frame)
             or len(self.camera_offset) != 3
         ):
             raise ValueError("Invalid physical sensor settings")
@@ -191,6 +196,27 @@ class PhysicalInputs:
         except (TransformException, ValueError):
             return None
         if self.odom_frame is None:
+            if self.camera_ground_height > 0:
+                try:
+                    # The lens midpoint differs from the mounting link used by
+                    # odometry. Transform that measured point before anchoring.
+                    camera_to_measured = self.tf_buffer.lookup_transform(
+                        odom.child_frame_id,
+                        self.camera_height_frame,
+                        Time.from_msg(odom.header.stamp),
+                    ).transform.translation
+                except TransformException:
+                    return None
+                measured_offset = rotate(camera_q, xyz(camera_to_measured))
+                measured_world_z = camera_position[2] + measured_offset[2]
+                if not math.isfinite(measured_world_z):
+                    return None
+                self.height = self.camera_ground_height - measured_world_z
+                self.node.get_logger().info(
+                    f"Anchored ground from {self.camera_height_frame}: "
+                    f"camera height {self.camera_ground_height:.3f} m, "
+                    f"world height offset {self.height:.3f} m"
+                )
             self.odom_frame = odom.header.frame_id
             transform = TransformStamped()
             transform.header.stamp = odom.header.stamp

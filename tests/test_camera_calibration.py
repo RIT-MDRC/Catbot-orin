@@ -13,6 +13,7 @@ from catbot_sim.camera_calibration import (
     foot_frames,
     foot_plane,
     load_calibration,
+    measured_plane_offset,
     plane,
     quaternion,
     roll_pitch_yaw,
@@ -59,6 +60,20 @@ def test_floor_cannot_reveal_x_y_or_yaw():
         )
         assert result["body_to_camera_xyz"] == pytest.approx([*xyz[:2], 0.07])
         assert result["roll_pitch_yaw_degrees"][2] == pytest.approx(yaw)
+
+
+def test_measured_center_height_accounts_for_reference_point_and_body_height():
+    # Camera link is upside down; measured center is 4 cm above that link.
+    offset = measured_plane_offset(
+        [0, 0, -1], np.diag([1, -1, -1]), [0, 0, -0.04], 0.44
+    )
+    assert offset == pytest.approx(0.40)
+    result = estimate_mount(
+        ([0, 0, -1], offset), ([0, 0, 1], 0.35), [0, 1, 0, 0], [0.4, 0, 0]
+    )
+    assert result["body_to_camera_xyz"] == pytest.approx([0.4, 0, 0.05])
+    with pytest.raises(ValueError):
+        measured_plane_offset([0, 0, -1], np.eye(3), [0, 0, 0], 0.44)
 
 
 def test_spherical_feet_locate_ground_below_centers():

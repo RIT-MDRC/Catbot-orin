@@ -227,6 +227,8 @@ def test_launch_applies_overrides_and_routes_workers(
         "hardware" if scenario.startswith("physical") else "simulation"
     )
     assert bridge["worker_timeout"] == 7.5
+    assert bridge["camera_ground_height"] == 0.28
+    assert bridge["camera_height_frame"] == "front_center"
     assert bridge["body_to_camera_xyz"] == expected_xyz
     assert bridge["estimate_contacts"] is True
     assert bridge["mapping_file"] == "/test workspace/mapping.json"

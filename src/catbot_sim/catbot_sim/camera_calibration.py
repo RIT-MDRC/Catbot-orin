@@ -179,6 +179,25 @@ def estimate_mount(camera_plane, body_plane, prior_wxyz, prior_xyz):
     }
 
 
+def measured_plane_offset(normal, world_rotation, measured_point, height):
+    """Convert a measured point's vertical floor clearance to camera-link plane D."""
+    if not math.isfinite(height) or height <= 0:
+        raise ValueError("Measured camera height must be finite and positive")
+    normal = np.asarray(normal, dtype=float)
+    measured_point = np.asarray(measured_point, dtype=float)
+    if (
+        normal.shape != (3,)
+        or measured_point.shape != (3,)
+        or not np.isfinite(normal).all()
+        or not np.isfinite(measured_point).all()
+    ):
+        raise ValueError("Invalid measured point or ground normal")
+    up_component = float((np.asarray(world_rotation) @ normal)[2])
+    if up_component < math.cos(math.radians(10)):
+        raise ValueError("Measured camera height requires a level ground plane")
+    return float(height * up_component - normal @ measured_point)
+
+
 def foot_frames(model_xml):
     """Use the selected saved model's foot geometry and existing bridge TF names."""
     root = ET.fromstring(model_xml)

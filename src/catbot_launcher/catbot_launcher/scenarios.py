@@ -33,6 +33,8 @@ BRIDGE_KEYS = (
     "sensor_timeout",
     "sensor_max_skew",
     "ground_height_offset",
+    "camera_ground_height",
+    "camera_height_frame",
     "contact_height",
     "estimate_contacts",
     "body_from_camera_wxyz",
@@ -136,6 +138,8 @@ def build_launch(default_scenario="physical_orin"):
     defaults.setdefault("remote_network_interface", "eth0")
     defaults.setdefault("imu_mount_from_tf", True)
     defaults.setdefault("world_frame", "map")
+    defaults.setdefault("camera_ground_height", 0.0)
+    defaults.setdefault("camera_height_frame", "{camera_name}_camera_center")
     defaults.setdefault("enable_camera_calibration", True)
     defaults.setdefault("camera_calibration_file", "")
     defaults.setdefault(
@@ -289,6 +293,8 @@ def build_launch(default_scenario="physical_orin"):
                                 "camera_info_topic",
                                 "imu_topic",
                                 "camera_calibration_output",
+                                "camera_ground_height",
+                                "camera_height_frame",
                             )
                         }
                     ],
