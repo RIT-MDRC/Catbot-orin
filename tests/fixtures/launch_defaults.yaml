@@ -39,6 +39,9 @@ startup_timeout: 40.0
 sensor_timeout: 0.5
 sensor_max_skew: 0.15
 ground_height_offset: 0.25
+estimate_ground_from_depth: false
+camera_ground_height: 0.28
+camera_height_frame: '{camera_name}_center'
 contact_height: 0.03
 estimate_contacts: false
 body_from_camera_wxyz: [1.0, 0.0, 0.0, 0.0]

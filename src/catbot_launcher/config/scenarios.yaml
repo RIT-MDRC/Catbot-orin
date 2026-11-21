@@ -46,6 +46,13 @@ startup_timeout: 120.0
 sensor_timeout: 0.25
 sensor_max_skew: 0.1
 ground_height_offset: 0.35
+# Fit depth while the policy is stopped and use the same ground for model TF and
+# policy height. The first reliable plane is required before publishing feedback.
+estimate_ground_from_depth: true
+# Optional tape-measure override; disable depth grounding before enabling this.
+# Zero uses depth for camera mount calibration as well.
+camera_ground_height: 0.0
+camera_height_frame: '{camera_name}_camera_center'
 contact_height: 0.02
 estimate_contacts: true
 # ZED odom axes start at the camera pose; use its gravity-aligned map for the body.
@@ -67,6 +74,13 @@ serial_number: '0'
 imu_topic: '/{camera_name}/zed_node/imu/data'
 odom_topic: '/{camera_name}/zed_node/odom'
 contact_topic: /body/state/foot_contacts
+# Explicit stationary calibration services; saving does not change a running mount.
+enable_camera_calibration: true
+camera_calibration_file: ''
+camera_calibration_output: '~/.config/catbot/camera_calibration.json'
+camera_frame: '{camera_name}_camera_link'
+depth_topic: '/{camera_name}/zed_node/depth/depth_registered'
+camera_info_topic: '/{camera_name}/zed_node/depth/camera_info'
 enable_foxglove: true
 enable_diagnostics: true
 # Health reporting thresholds, independent of the motion-control safety timeouts.

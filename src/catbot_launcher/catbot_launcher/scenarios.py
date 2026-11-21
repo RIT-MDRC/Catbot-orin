@@ -33,6 +33,11 @@ BRIDGE_KEYS = (
     "sensor_timeout",
     "sensor_max_skew",
     "ground_height_offset",
+    "estimate_ground_from_depth",
+    "depth_topic",
+    "camera_info_topic",
+    "camera_ground_height",
+    "camera_height_frame",
     "contact_height",
     "estimate_contacts",
     "body_from_camera_wxyz",
@@ -136,6 +141,19 @@ def build_launch(default_scenario="physical_orin"):
     defaults.setdefault("remote_network_interface", "eth0")
     defaults.setdefault("imu_mount_from_tf", True)
     defaults.setdefault("world_frame", "map")
+    defaults.setdefault("camera_ground_height", 0.0)
+    defaults.setdefault("estimate_ground_from_depth", False)
+    defaults.setdefault("camera_height_frame", "{camera_name}_camera_center")
+    defaults.setdefault("enable_camera_calibration", True)
+    defaults.setdefault("camera_calibration_file", "")
+    defaults.setdefault(
+        "camera_calibration_output", "~/.config/catbot/camera_calibration.json"
+    )
+    defaults.setdefault("camera_frame", "{camera_name}_camera_link")
+    defaults.setdefault("depth_topic", "/{camera_name}/zed_node/depth/depth_registered")
+    defaults.setdefault(
+        "camera_info_topic", "/{camera_name}/zed_node/depth/camera_info"
+    )
     declarations = [
         DeclareLaunchArgument(
             "scenario", default_value=default_scenario, choices=list(SCENARIOS)
@@ -189,6 +207,15 @@ def build_launch(default_scenario="physical_orin"):
             "policy_worker_project",
         ):
             values[key] = str(Path(values[key]).expanduser())
+        if values["camera_calibration_file"]:
+            from catbot_sim.camera_calibration import load_calibration
+
+            values.update(
+                load_calibration(
+                    values["camera_calibration_file"],
+                    (Path(values["run_directory"]) / "model.xml").read_text(),
+                )
+            )
         for device, project, environment, sync in (
             ("device", "rollout_repository", "worker_environment", "worker_sync"),
             (
@@ -250,6 +277,33 @@ def build_launch(default_scenario="physical_orin"):
                 }.items(),
             )
         ]
+        if backend == "hardware" and values["enable_camera_calibration"]:
+            actions.append(
+                Node(
+                    package="catbot_sim",
+                    executable="camera_calibration",
+                    output="screen",
+                    parameters=[
+                        {
+                            key: values[key]
+                            for key in (
+                                "run_directory",
+                                "mapping_file",
+                                "body_from_camera_wxyz",
+                                "body_to_camera_xyz",
+                                "world_frame",
+                                "camera_frame",
+                                "depth_topic",
+                                "camera_info_topic",
+                                "imu_topic",
+                                "camera_calibration_output",
+                                "camera_ground_height",
+                                "camera_height_frame",
+                            )
+                        }
+                    ],
+                )
+            )
         actions.append(
             Node(
                 package="catbot_sim",

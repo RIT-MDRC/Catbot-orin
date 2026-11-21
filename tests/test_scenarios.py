@@ -117,8 +117,16 @@ def test_array_length_cannot_change(values):
         ("simulation_orin", "true", "true", "false", False),
     ],
 )
+@pytest.mark.parametrize("saved_mount", [False, True])
 def test_launch_applies_overrides_and_routes_workers(
-    monkeypatch, tmp_path, scenario, camera, monitor_camera, motors, start_pi
+    monkeypatch,
+    tmp_path,
+    scenario,
+    camera,
+    monitor_camera,
+    motors,
+    start_pi,
+    saved_mount,
 ):
     """Execute launch assembly using controlled YAML and CLI overrides."""
     import sys
@@ -173,7 +181,25 @@ def test_launch_applies_overrides_and_routes_workers(
         "worker_timeout": "7.5",
         "body_to_camera_xyz": "[0.4, -0.2, 0.1]",
         "estimate_contacts": "true",
+        "enable_camera_calibration": str(start_pi).lower(),
     }
+    expected_xyz = [0.4, -0.2, 0.1]
+    if saved_mount:
+        from catbot_sim.camera_calibration import save_calibration
+
+        xml = "<mujoco/>"
+        (tmp_path / "model.xml").write_text(xml)
+        expected_xyz = [0.35, 0.02, 0.07]
+        calibration = tmp_path / "camera.json"
+        save_calibration(
+            calibration,
+            {
+                "body_from_camera_wxyz": [1, 0, 0, 0],
+                "body_to_camera_xyz": expected_xyz,
+            },
+            xml,
+        )
+        raw["camera_calibration_file"] = str(calibration)
     modules["launch.substitutions"]["LaunchConfiguration"].side_effect = lambda key: (
         SimpleNamespace(perform=lambda context: raw[key])
     )
@@ -201,9 +227,22 @@ def test_launch_applies_overrides_and_routes_workers(
         "hardware" if scenario.startswith("physical") else "simulation"
     )
     assert bridge["worker_timeout"] == 7.5
-    assert bridge["body_to_camera_xyz"] == [0.4, -0.2, 0.1]
+    assert bridge["camera_ground_height"] == 0.28
+    assert bridge["camera_height_frame"] == "front_center"
+    assert bridge["body_to_camera_xyz"] == expected_xyz
     assert bridge["estimate_contacts"] is True
     assert bridge["mapping_file"] == "/test workspace/mapping.json"
+    calibrators = [
+        call.kwargs
+        for call in modules["launch_ros.actions"]["Node"].call_args_list
+        if call.kwargs["executable"] == "camera_calibration"
+    ]
+    assert bool(calibrators) is (scenario == "physical_orin" and start_pi)
+    if calibrators:
+        parameters = calibrators[0]["parameters"][0]
+        assert parameters["body_to_camera_xyz"] == expected_xyz
+        assert parameters["run_directory"] == str(tmp_path)
+        assert parameters["imu_topic"] == "/custom/imu"
     if scenario == "simulation_orin":
         assert "catbot_supervisor" not in nodes
         policy_node = nodes["catbot_policy"]
