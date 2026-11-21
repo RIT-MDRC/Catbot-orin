@@ -46,10 +46,13 @@ Foxglove (Layouts > Import from file). This is exported-layout JSON, not the SDK
 notebook format. Connect to `ws://<ORIN-IP>:8765` using the shared ROS domain and
 discovery settings. Then choose operations in Foxglove:
 
-- **Home robot** requests the ordered `home_robot` script on the Pi. It requires
+- **Home robot** requests `home_robot` on the Pi. All knees and flexion/extension
+  actuators home in one eight-axis batch; all must finish before arming. It requires
   operator clearance before abduction homing and leaves homed axes armed/holding.
 - **Motor calibration** requests full calibration for all 12 actuators in
-  parallel, then homes and arms knees, flexion, and back abduction in order. It
+  parallel, then homes all knees and flexion/extension together
+  (`flk, frk, blk, brk, flf, frf, blf, brf`). It waits for all eight to finish
+  before arming them, then homes and arms back abduction. It
   moves `flf, frf` to +30 degrees, waits for clearance confirmation, then homes
   and arms `fla, fra`, then returns `flf, frf` together to 0 degrees and waits
   for settled measured feedback. Each homing group must fully return to IDLE before arming;
