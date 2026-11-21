@@ -6,9 +6,15 @@ import time
 from geometry_msgs.msg import TransformStamped, Vector3Stamped
 from nav_msgs.msg import Odometry
 from rclpy.qos import qos_profile_sensor_data
+from rclpy.time import Time
 from sensor_msgs.msg import Imu
 from std_msgs.msg import UInt8MultiArray
-from tf2_ros import StaticTransformBroadcaster
+from tf2_ros import (
+    Buffer,
+    StaticTransformBroadcaster,
+    TransformException,
+    TransformListener,
+)
 
 from catbot_interfaces.msg import BodyKinematicState
 
@@ -67,6 +73,11 @@ class PhysicalInputs:
         self.imu_rotation = normalized(
             list(param("body_from_imu_wxyz", [1.0, 0.0, 0.0, 0.0]))
         )
+        self.world_frame = str(param("world_frame", ""))
+        self.imu_mount_from_tf = bool(param("imu_mount_from_tf", False))
+        if self.imu_mount_from_tf or self.world_frame:
+            self.tf_buffer = Buffer()
+            self.tf_listener = TransformListener(self.tf_buffer, node)
         self.camera_offset = list(param("body_to_camera_xyz", [0.0, 0.0, 0.0]))
         self.remove_gravity = bool(param("imu_includes_gravity", True))
         if (
@@ -152,30 +163,68 @@ class PhysicalInputs:
             self.odom_frame and odom.header.frame_id != self.odom_frame
         ):
             return None
-        if self.odom_frame is None:
-            self.odom_frame = odom.header.frame_id
-            transform = TransformStamped()
-            transform.header.stamp = odom.header.stamp
-            transform.header.frame_id = self.odom_frame
-            transform.child_frame_id = "robot/world"
-            transform.transform.translation.z = -self.height
-            transform.transform.rotation.w = 1.0
-            self.world_tf.sendTransform(transform)
         orientation = odom.pose.pose.orientation
         try:
             camera_q = normalized(
                 [orientation.w, orientation.x, orientation.y, orientation.z]
             )
-        except ValueError:
+            camera_position = xyz(odom.pose.pose.position)
+            if self.world_frame and self.world_frame != odom.header.frame_id:
+                # ZED's odometry starts at the camera's pose, including its tilt.
+                # Convert to the gravity-aligned map before deriving body pose.
+                world_from_odom = self.tf_buffer.lookup_transform(
+                    self.world_frame,
+                    odom.header.frame_id,
+                    Time.from_msg(odom.header.stamp),
+                ).transform
+                q = world_from_odom.rotation
+                rotation = normalized([q.w, q.x, q.y, q.z])
+                camera_q = multiply(rotation, camera_q)
+                camera_position = [
+                    a + b
+                    for a, b in zip(
+                        rotate(rotation, camera_position),
+                        xyz(world_from_odom.translation),
+                        strict=True,
+                    )
+                ]
+        except (TransformException, ValueError):
             return None
+        if self.odom_frame is None:
+            self.odom_frame = odom.header.frame_id
+            transform = TransformStamped()
+            transform.header.stamp = odom.header.stamp
+            transform.header.frame_id = self.world_frame or self.odom_frame
+            transform.child_frame_id = "robot/world"
+            transform.transform.translation.z = -self.height
+            transform.transform.rotation.w = 1.0
+            self.world_tf.sendTransform(transform)
         body_q = multiply(camera_q, inverse(self.camera_rotation))
+        imu_rotation = self.imu_rotation
+        if self.imu_mount_from_tf:
+            if not odom.child_frame_id or not imu.header.frame_id:
+                return None
+            try:
+                camera_from_imu = self.tf_buffer.lookup_transform(
+                    odom.child_frame_id, imu.header.frame_id, Time()
+                ).transform.rotation
+                imu_rotation = multiply(
+                    self.camera_rotation,
+                    normalized(
+                        [
+                            camera_from_imu.w,
+                            camera_from_imu.x,
+                            camera_from_imu.y,
+                            camera_from_imu.z,
+                        ]
+                    ),
+                )
+            except (TransformException, ValueError):
+                return None
         offset_world = rotate(body_q, self.camera_offset)
-        position = [
-            p - o
-            for p, o in zip(xyz(odom.pose.pose.position), offset_world, strict=True)
-        ]
+        position = [p - o for p, o in zip(camera_position, offset_world, strict=True)]
         position[2] += self.height
-        angular = rotate(self.imu_rotation, xyz(imu.angular_velocity))
+        angular = rotate(imu_rotation, xyz(imu.angular_velocity))
         # Odometry twist is in child_frame_id. Remove velocity due to the camera lever arm.
         camera_velocity_body = rotate(
             self.camera_rotation, xyz(odom.twist.twist.linear)
@@ -211,7 +260,7 @@ class PhysicalInputs:
         elif not self.estimate_contacts:
             return None
         if imu.linear_acceleration_covariance[0] >= 0:
-            accel = rotate(self.imu_rotation, xyz(imu.linear_acceleration))
+            accel = rotate(imu_rotation, xyz(imu.linear_acceleration))
             if self.remove_gravity:
                 gravity = rotate(inverse(body_q), [0.0, 0.0, -9.81])
                 accel = [a + g for a, g in zip(accel, gravity, strict=True)]

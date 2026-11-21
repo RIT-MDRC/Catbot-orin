@@ -8,12 +8,19 @@ Foxglove bridge for remote diagnostics.
 ## Build
 
 ```bash
-cd /home/catbot/ROS/ros2_ws
+cd /home/catbot/projects/ros2_ws
+git submodule update --init external/Catbot external/catbot_sim_rollout
 source /opt/ros/humble/setup.bash
 rosdep install --from-paths src --ignore-src -r -y
 colcon build --symlink-install
 source install/setup.bash
 ```
+
+The shared ROS packages under `src/` link to the single pinned source copy in
+`external/Catbot`. Normal `colcon build` discovers them once; use it instead of
+passing `external/Catbot` paths through `--base-paths`. See the
+[scenario build instructions](docs/SIMULATION.md#one-policy-implementation-on-either-machine)
+for the one-time cleanup when upgrading an existing workspace.
 
 ## Launch
 
@@ -62,6 +69,12 @@ ros2 launch catbot_launcher physical_orin.launch.py    # Pi foundation, Orin pol
 ros2 launch catbot_launcher simulation_pi.launch.py    # Orin sim, Pi policy only
 ros2 launch catbot_launcher simulation_orin.launch.py  # Orin sim + policy; Pi idle
 ```
+
+`physical_orin.launch.py` starts the Pi's disarmed Foundation/supervisor services
+over SSH by default, alongside the Orin services. Calibration, policy startup and
+policy motion remain separate explicit Foxglove actions. Use `start_pi:=false`
+when Pi services are managed separately. See [supervisor deployment](docs/SUPERVISOR.md)
+for Pi setup, SSH/overlay settings and shutdown behavior.
 
 All start Foxglove and publish the live model on `/body/model`. Physical scenarios
 start the ZED camera and map odometry/IMU plus motor feedback into policy inputs.

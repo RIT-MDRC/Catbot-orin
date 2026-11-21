@@ -37,6 +37,8 @@ BRIDGE_KEYS = (
     "estimate_contacts",
     "body_from_camera_wxyz",
     "body_from_imu_wxyz",
+    "world_frame",
+    "imu_mount_from_tf",
     "body_to_camera_xyz",
     "imu_includes_gravity",
     "imu_topic",
@@ -126,6 +128,14 @@ def build_launch(default_scenario="physical_orin"):
     defaults.setdefault("enable_diagnostics", True)
     defaults.setdefault("diagnostics_stream_timeout", 2.0)
     defaults.setdefault("diagnostics_frame_timeout", 10.0)
+    defaults.setdefault("start_pi", True)
+    defaults.setdefault(
+        "remote_ros_overlay",
+        "/home/{remote_user}/.local/share/catbot/ros/install/setup.bash",
+    )
+    defaults.setdefault("remote_network_interface", "eth0")
+    defaults.setdefault("imu_mount_from_tf", True)
+    defaults.setdefault("world_frame", "map")
     declarations = [
         DeclareLaunchArgument(
             "scenario", default_value=default_scenario, choices=list(SCENARIOS)
@@ -252,41 +262,85 @@ def build_launch(default_scenario="physical_orin"):
             )
         )
         if policy_host == "orin":
+            policy_parameters = {
+                **{
+                    key: values[key]
+                    for key in POLICY_PARAMETERS
+                    if key != "simulation_mode"
+                },
+                "simulation_mode": backend == "simulation",
+                "policy_python": ParameterValue(
+                    values["policy_python"], value_type=str
+                ),
+                "policy_worker_environment": ParameterValue(
+                    values["policy_worker_environment"], value_type=str
+                ),
+                "policy_worker_sync": ParameterValue(
+                    values["policy_worker_sync"], value_type=str
+                ),
+            }
+            if backend == "simulation":
+                # All-local simulation has no Pi lease or action-forwarding peer.
+                policy_parameters.update(
+                    supervised_actions=False,
+                    require_provider_contract=True,
+                    provider_contract_topic="/policy/contract",
+                )
+            else:
+                policy_parameters.update(
+                    {
+                        "scenario": name,
+                        **{
+                            key.removeprefix("supervisor_"): values[key]
+                            for key in values
+                            if key.startswith("supervisor_")
+                            and key
+                            not in ("supervisor_run_id", "supervisor_git_commit")
+                        },
+                        "supervisor_run_id": values["supervisor_run_id"],
+                        "git_commit": values["supervisor_git_commit"],
+                    }
+                )
             actions.append(
                 Node(
-                    package="catbot_supervisor",
-                    executable="orin",
+                    package=(
+                        "catbot_policy"
+                        if backend == "simulation"
+                        else "catbot_supervisor"
+                    ),
+                    executable="policy" if backend == "simulation" else "orin",
                     prefix=shlex.quote(values["policy_ros_python"]),
                     output="screen",
                     on_exit=Shutdown(),
-                    parameters=[
-                        {
-                            **{
-                                key: values[key]
-                                for key in POLICY_PARAMETERS
-                                if key != "simulation_mode"
-                            },
-                            "simulation_mode": backend == "simulation",
-                            "scenario": name,
-                            **{
-                                key.removeprefix("supervisor_"): values[key]
-                                for key in values
-                                if key.startswith("supervisor_")
-                                and key
-                                not in ("supervisor_run_id", "supervisor_git_commit")
-                            },
-                            "supervisor_run_id": values["supervisor_run_id"],
-                            "git_commit": values["supervisor_git_commit"],
-                            "policy_python": ParameterValue(
-                                values["policy_python"], value_type=str
-                            ),
-                            "policy_worker_environment": ParameterValue(
-                                values["policy_worker_environment"], value_type=str
-                            ),
-                            "policy_worker_sync": ParameterValue(
-                                values["policy_worker_sync"], value_type=str
-                            ),
-                        }
+                    parameters=[policy_parameters],
+                )
+            )
+        if values["start_pi"] and name == "physical_orin":
+            actions.append(
+                ExecuteProcess(
+                    output="screen",
+                    on_exit=Shutdown(),
+                    cmd=[
+                        "ros2",
+                        "run",
+                        "catbot_sim",
+                        "remote",
+                        "--role",
+                        "supervisor",
+                        "--host",
+                        values["remote_host"],
+                        "--user",
+                        values["remote_user"],
+                        "--workspace",
+                        values["remote_workspace"],
+                        "--environment",
+                        values["remote_environment"],
+                        "--ros-overlay",
+                        values["remote_ros_overlay"],
+                        "--network-interface",
+                        values["remote_network_interface"],
+                        "--mapping-file",
+                        values["remote_mapping_file"],
                     ],
                 )
             )

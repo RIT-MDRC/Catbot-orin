@@ -104,18 +104,21 @@ def test_array_length_cannot_change(values):
 
 
 @pytest.mark.parametrize(
-    "scenario,camera,monitor_camera,motors",
+    "scenario,camera,monitor_camera,motors,start_pi",
     [
-        ("simulation_orin", "auto", "false", "false"),
-        ("simulation_pi", "auto", "false", "false"),
-        ("physical_orin", "auto", "true", "true"),
-        ("physical_pi", "auto", "true", "true"),
-        ("physical_orin", "false", "true", "true"),
-        ("simulation_orin", "true", "true", "false"),
+        ("simulation_orin", "auto", "false", "false", False),
+        ("simulation_orin", "auto", "false", "false", True),
+        ("simulation_pi", "auto", "false", "false", False),
+        ("simulation_pi", "auto", "false", "false", True),
+        ("physical_orin", "auto", "true", "true", True),
+        ("physical_orin", "auto", "true", "true", False),
+        ("physical_pi", "auto", "true", "true", False),
+        ("physical_orin", "false", "true", "true", False),
+        ("simulation_orin", "true", "true", "false", False),
     ],
 )
 def test_launch_applies_overrides_and_routes_workers(
-    monkeypatch, tmp_path, scenario, camera, monitor_camera, motors
+    monkeypatch, tmp_path, scenario, camera, monitor_camera, motors, start_pi
 ):
     """Execute launch assembly using controlled YAML and CLI overrides."""
     import sys
@@ -164,6 +167,7 @@ def test_launch_applies_overrides_and_routes_workers(
         "scenario": scenario,
         "run_directory": str(tmp_path),
         "enable_camera": camera,
+        "start_pi": str(start_pi).lower(),
         "imu_topic": "/custom/imu",
         "odom_topic": "/custom/odom",
         "worker_timeout": "7.5",
@@ -200,7 +204,20 @@ def test_launch_applies_overrides_and_routes_workers(
     assert bridge["body_to_camera_xyz"] == [0.4, -0.2, 0.1]
     assert bridge["estimate_contacts"] is True
     assert bridge["mapping_file"] == "/test workspace/mapping.json"
-    if scenario.endswith("orin"):
+    if scenario == "simulation_orin":
+        assert "catbot_supervisor" not in nodes
+        policy_node = nodes["catbot_policy"]
+        assert policy_node["executable"] == "policy"
+        assert policy_node["prefix"] == "/test/python3"
+        policy = policy_node["parameters"][0]
+        assert policy["policy_bundle"] == "/test workspace/bundle"
+        assert policy["feedback_timeout"] == 0.6
+        assert policy["simulation_mode"] is True
+        assert policy["supervised_actions"] is False
+        assert policy["require_provider_contract"] is True
+        assert policy["provider_contract_topic"] == "/policy/contract"
+    elif scenario == "physical_orin":
+        assert "catbot_policy" not in nodes
         policy = nodes["catbot_supervisor"]["parameters"][0]
         assert policy["policy_bundle"] == "/test workspace/bundle"
         assert policy["feedback_timeout"] == 0.6
@@ -210,7 +227,21 @@ def test_launch_applies_overrides_and_routes_workers(
     else:
         assert "catbot_policy" not in nodes
     processes = modules["launch.actions"]["ExecuteProcess"].call_args_list
-    if scenario.endswith("orin"):
+    if scenario == "physical_orin" and start_pi:
+        assert len(processes) == 1
+        command = processes[0].kwargs["cmd"]
+        options = dict(zip(command[4::2], command[5::2], strict=True))
+        assert options == {
+            "--role": "supervisor",
+            "--host": "test-pi.local",
+            "--user": "test-user",
+            "--workspace": "/remote workspace",
+            "--environment": "/remote environment.bash",
+            "--ros-overlay": "/remote overlay/setup.bash",
+            "--network-interface": "test-eth",
+            "--mapping-file": "/remote workspace/mapping.json",
+        }
+    elif scenario.endswith("orin"):
         assert not processes
     else:
         command = processes[0].kwargs["cmd"]

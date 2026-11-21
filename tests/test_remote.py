@@ -1,6 +1,7 @@
 """Verify SSH command construction, lease renewal and local teardown."""
 
 import json
+import os
 import shlex
 import signal
 import subprocess
@@ -42,7 +43,7 @@ def ssh(monkeypatch):
     return argv, child, spawn
 
 
-@pytest.mark.parametrize("role", ["both", "foundation", "policy"])
+@pytest.mark.parametrize("role", ["both", "foundation", "policy", "supervisor"])
 def test_remote_roles_and_quoting(ssh, role):
     argv, child, spawn = ssh
     argv += ["--role", role]
@@ -55,10 +56,71 @@ def test_remote_roles_and_quoting(ssh, role):
     script = json.loads(shipped[4])["command"]
     assert script.startswith("source '/test environment/ros.bash' && ")
     assert "source '/workspace with spaces/install/setup.bash'" in script
-    assert ("ros2 run foundation main" in script) == (role != "policy")
-    assert ("catbot_policy.node" in script) == (role != "foundation")
+    assert ("ros2 run foundation main" in script) == (role in ("both", "foundation"))
+    assert ("catbot_policy.node" in script) == (role in ("both", "policy"))
+    assert ("ros2 launch catbot_supervisor rpi.launch.py" in script) == (
+        role == "supervisor"
+    )
     assert ("wait -n" in script) == (role == "both")
     child.stdin.close.assert_called_once()
+
+
+@pytest.mark.parametrize("missing", ["--policy-bundle", "--policy-worker-project"])
+def test_legacy_roles_require_policy_arguments(ssh, missing):
+    argv, _, spawn = ssh
+    index = argv.index(missing)
+    del argv[index : index + 2]
+    with pytest.raises(SystemExit) as error:
+        remote.main()
+    assert error.value.code == 2
+    spawn.assert_not_called()
+
+
+def test_supervisor_sources_cli_overlay_without_policy_artifacts(
+    ssh, tmp_path, monkeypatch
+):
+    argv, _, spawn = ssh
+    for option in ("--policy-bundle", "--policy-worker-project"):
+        index = argv.index(option)
+        del argv[index : index + 2]
+    environment = tmp_path / "shared environment.bash"
+    environment.write_text("export CATBOT_TEST_DDS=shared\n")
+    overlay = tmp_path / "CLI overlay/setup.bash"
+    overlay.parent.mkdir()
+    overlay.write_text('test "$CATBOT_TEST_DDS" = shared\n')
+    bin_directory = tmp_path / "bin"
+    bin_directory.mkdir()
+    probe = bin_directory / "ros2"
+    probe.write_text('#!/bin/sh\nprintf \'%s\\n\' "$CATBOT_TEST_DDS" "$@"\n')
+    probe.chmod(0o755)
+    argv += [
+        "--role",
+        "supervisor",
+        "--environment",
+        str(environment),
+        "--ros-overlay",
+        str(overlay),
+        "--network-interface",
+        "test eth",
+    ]
+    remote.main()
+    shipped = shlex.split(spawn.call_args.args[0][-1])
+    script = json.loads(shipped[4])["command"]
+    monkeypatch.setenv("PATH", str(bin_directory) + ":" + os.environ["PATH"])
+    with monkeypatch.context() as execution:
+        execution.setattr(subprocess, "Popen", REAL_POPEN)
+        result = subprocess.run(
+            ["bash", "-c", script], capture_output=True, text=True, check=False
+        )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        "shared",
+        "launch",
+        "catbot_supervisor",
+        "rpi.launch.py",
+        "network_interface:=test eth",
+        "mapping_file:=/mapping",
+    ]
 
 
 @pytest.mark.parametrize("environment_exists", [True, False])
