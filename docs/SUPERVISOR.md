@@ -60,7 +60,7 @@ discovery settings. Then choose operations in Foxglove:
   Explicit position moves select position/trapezoidal mode and enter closed loop
   automatically, preserving speed/acceleration limits. Policy forwarding still
   requires the separate RUN request. Emergency latches Foundation move/arm
-  commands until the Pi's explicit recovery confirms idle and clears the latch.
+  commands until the Pi's explicit recovery confirms stopped axes and clears the latch.
 - **Start policy (no motor commands)** requests only the Orin `policy` job.
   It does not run any robot script, clear faults, home or arm motors.
 - **RUN — ENABLE POLICY MOTION** is a separate explicit request after the motors
@@ -69,6 +69,18 @@ discovery settings. Then choose operations in Foxglove:
   forwarding before stopping inference; **E-STOP** disarms and stops policy.
 - **Run named script** accepts any installed registry name shown in
   `available_scripts` on `/rpi/supervisor/status`, including future entry points.
+
+Actuator faults/readiness failures latch emergency with `stop_behavior: hold_healthy`:
+policy forwarding stops, healthy closed-loop axes hold their measured positions,
+and faulted/unavailable or homing/calibrating axes receive IDLE. No speed or
+acceleration limits change and no axis is re-armed. Clear the underlying fault,
+then explicitly call `/rpi/supervisor/recover`; it leaves existing holds intact
+and does not resume a script or policy. After this recovery, `idle` describes the
+supervisor gate, and some motors can still be in closed loop.
+
+Explicit **E-STOP**, link/action watchdogs, stale Foundation feedback, unhealthy
+Pi readings and script timeouts still disarm all axes (`stop_behavior: idle_all`).
+E-stop overrides a holding fault and requires confirmed IDLE before recovery.
 
 Starting inference and executing a robot control script are independent. Local
 scripts need Pi/body health, not an active policy; scripts needing the Orin link
