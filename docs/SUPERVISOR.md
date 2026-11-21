@@ -1,27 +1,35 @@
 # Orin Supervisor deployment
 
-`physical_orin.launch.py` and `simulation_orin.launch.py` start the Catbot
-`catbot_supervisor/orin` service host alongside the sensing/kinematics bridge.
-They do not launch a policy directly, start the Pi over SSH, or enable motion.
-The operator starts the Pi's own Foundation/RPi Supervisor launch separately.
+`physical_orin.launch.py` starts the Catbot `catbot_supervisor/orin` service host
+alongside the sensing/kinematics bridge. By default it also starts the Pi's
+Foundation/RPi Supervisor launch over SSH. It does not start policy inference or
+enable motion. Use `start_pi:=false` when the Pi services are managed separately.
 `physical_pi` is deprecated because it bypasses this ownership model;
 `simulation_pi` retains its legacy inference experiment path.
 
 Orin-owned settings live in `src/catbot_launcher/config/orin_supervisor.yaml`.
 Existing scenario arguments select policy artifacts, device and worker paths.
 The supervisor receives the scenario name and all policy settings; policy process
-start belongs to Pi scripts, after Orin preflight succeeds. Both managed hardware
-and simulation validate the bridge's `/policy/contract` before reporting ready.
-No unsupervised policy publisher is added by either Orin-hosted scenario.
+start is an explicit operator action after Orin preflight succeeds. Hardware
+policy validates the bridge's `/policy/contract` before reporting ready.
 
 ```bash
 # On Orin, after building and sourcing the pinned packages:
 ros2 launch catbot_launcher physical_orin.launch.py
-# For simulation instead:
-ros2 launch catbot_launcher simulation_orin.launch.py enable_camera:=false
-# On Pi, build/source the SAME Catbot interface revision, then:
+# Orin-only orchestration when the Pi services are already running separately:
+ros2 launch catbot_launcher physical_orin.launch.py start_pi:=false
+# With start_pi:=false, start the Pi separately after sourcing its ROS overlay:
 ros2 launch catbot_supervisor rpi.launch.py
 ```
+
+The SSH path uses `remote_host`, `remote_user`, `remote_environment`,
+`remote_ros_overlay`, `remote_mapping_file`, and `remote_network_interface` from
+`scenarios.yaml`. Prepare/build the Pi first and configure passwordless SSH from
+Orin. The default overlay is `/home/catbot/.local/share/catbot/ros/install/setup.bash`,
+created by `catbot setup` on the Pi. The shared environment file supplies ROS and
+DDS settings before the overlay is sourced. Stop separate Pi/Orin launches before
+using the combined launch. Stopping it closes the SSH lease; the remote supervisor
+shuts down its Pi process group, with escalation if it does not exit.
 
 These launches start infrastructure only: camera/sensors, kinematics/visualization
 bridge, diagnostics, Foxglove Bridge and the Orin service host. Pi boot only
@@ -60,10 +68,10 @@ revision. A config-schema mismatch in that worker must be repaired with the
 existing `catbot_policy.rollout_setup.prepare_rollout` helper before the full
 stack can become healthy. It is not evidence that a trained policy was started.
 
-Simulation also waits for a Pi protocol peer to start the policy and forward/ack
-its proposals. The scenario test supplies a peer, not a hardware Pi. A full robot
-simulation of Pi body maintenance is not added here. Do not direct simulation
-commands at a physical Foundation instance.
+`simulation_orin.launch.py` is all-local: it starts its policy automatically and
+never starts Pi hardware services, regardless of `start_pi`. It validates the
+simulator contract and sends commands directly to the simulator. Use the physical
+launch above for operator-controlled hardware standby.
 
 The shared Catbot package documents the API. Useful endpoints:
 

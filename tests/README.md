@@ -44,4 +44,8 @@ sensor input and a Pi protocol peer to exercise
 probe/clock replies, preflight, explicit policy start, forwarding acknowledgements,
 verified readiness, telemetry tags and the status service. It does not launch Pi
 hardware or introduce a separate joint-repository test framework. The physical
-Orin launch no longer starts Foundation over SSH; Pi launch/config is independent.
+Orin launch starts the Pi services over SSH by default, with `start_pi:=false`
+preserving separate Pi management. The ROS test covers both paths, replacing SSH
+with a lease-reading stand-in so no hardware connection is made. Remote command
+tests execute the shared-environment/ROS-overlay chain with a harmless ros2 probe;
+the existing process-group tests cover lease expiry and descendant cleanup.

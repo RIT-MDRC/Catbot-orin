@@ -4,6 +4,9 @@ remote_host: test-pi.local
 remote_user: test-user
 remote_workspace: /remote workspace
 remote_environment: /remote environment.bash
+start_pi: false
+remote_ros_overlay: '/remote overlay/setup.bash'
+remote_network_interface: test-eth
 run_id: ''
 checkpoint: ''
 policy_entity: test-team

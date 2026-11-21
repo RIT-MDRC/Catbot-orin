@@ -37,6 +37,13 @@ camera by default. Every launch includes exactly one Foxglove bridge.
 directly to the simulator after validating `/policy/contract`. It needs no Pi
 connection or supervisor job request. `physical_orin` uses the Orin supervisor
 and retains the Pi lease, preflight and explicit policy-start requirements.
+`physical_orin` also starts the Pi's disarmed Foundation/supervisor services over
+SSH by default; use `start_pi:=false` when they are already managed separately.
+The Pi must already be built, with passwordless SSH and its shared ROS/DDS
+environment configured. `remote_ros_overlay` selects its built ROS overlay and
+defaults to the CLI-managed install. `remote_network_interface` defaults to `eth0`.
+Stopping the launch shuts down the remote services through the SSH lease.
+Simulation scenarios never start Pi hardware services through this option.
 
 ## Defaults and overrides
 

@@ -70,6 +70,12 @@ ros2 launch catbot_launcher simulation_pi.launch.py    # Orin sim, Pi policy onl
 ros2 launch catbot_launcher simulation_orin.launch.py  # Orin sim + policy; Pi idle
 ```
 
+`physical_orin.launch.py` starts the Pi's disarmed Foundation/supervisor services
+over SSH by default, alongside the Orin services. Calibration, policy startup and
+policy motion remain separate explicit Foxglove actions. Use `start_pi:=false`
+when Pi services are managed separately. See [supervisor deployment](docs/SUPERVISOR.md)
+for Pi setup, SSH/overlay settings and shutdown behavior.
+
 All start Foxglove and publish the live model on `/body/model`. Physical scenarios
 start the ZED camera and map odometry/IMU plus motor feedback into policy inputs.
 Simulation uses the same position-control and joint-state topics as foundation.

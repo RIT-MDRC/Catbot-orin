@@ -17,7 +17,7 @@ REMOTE = Path(__file__).with_name("remote_supervisor.py").read_text()
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--role", choices=["both", "foundation", "policy"], default="both"
+        "--role", choices=["both", "foundation", "policy", "supervisor"], default="both"
     )
     parser.add_argument("--policy-device", default="cpu")
     for name in (
@@ -41,7 +41,7 @@ def main():
         default="auto",
     )
     parser.add_argument("--policy-ros-python", default="/usr/bin/python3")
-    parser.add_argument("--policy-worker-project", required=True)
+    parser.add_argument("--policy-worker-project", default="")
     parser.add_argument("--policy-uv-executable", default="uv")
     parser.add_argument("--policy-worker-timeout", type=float, default=2.0)
     parser.add_argument("--policy-startup-timeout", type=float, default=120.0)
@@ -49,13 +49,21 @@ def main():
     parser.add_argument("--host", default="192.168.0.3")
     parser.add_argument("--user", required=True)
     parser.add_argument("--workspace", required=True)
-    parser.add_argument("--policy-bundle", required=True)
+    parser.add_argument("--policy-bundle", default="")
     parser.add_argument("--mapping-file", required=True)
+    parser.add_argument("--ros-overlay", default="")
+    parser.add_argument("--network-interface", default="eth0")
     parser.add_argument(
         "--environment",
         default="/home/catbot/.config/catbot/ros_environment.bash",
     )
     args = parser.parse_args()
+    if args.role != "supervisor" and (
+        not args.policy_worker_project or not args.policy_bundle
+    ):
+        parser.error(
+            "--policy-worker-project and --policy-bundle are required for this role"
+        )
     if not all(
         math.isfinite(v) and v > 0
         for v in (
@@ -74,9 +82,23 @@ def main():
     quote = shlex.quote
     setup = [
         "source " + quote(args.environment),
-        "source " + quote(args.workspace.rstrip("/") + "/install/setup.bash"),
+        "source "
+        + quote(args.ros_overlay or args.workspace.rstrip("/") + "/install/setup.bash"),
     ]
     commands = []
+    if args.role == "supervisor":
+        commands.append(
+            shlex.join(
+                [
+                    "ros2",
+                    "launch",
+                    "catbot_supervisor",
+                    "rpi.launch.py",
+                    "network_interface:=" + args.network_interface,
+                    "mapping_file:=" + args.mapping_file,
+                ]
+            )
+        )
     if args.role in ("both", "foundation"):
         # Preserve the foundation package's existing module-relative import layout.
         locate = "from importlib.util import find_spec; from pathlib import Path; print(Path(find_spec('foundation').origin).parent)"

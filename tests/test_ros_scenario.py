@@ -57,8 +57,11 @@ def test_colcon_discovers_one_copy_of_each_shared_package(tmp_path):
         assert source.resolve() == ROOT / "external/Catbot/src" / name
 
 
-@pytest.mark.parametrize("scenario", ["simulation_orin", "physical_orin"])
-def test_orin_entrypoint(tmp_path, scenario):
+@pytest.mark.parametrize(
+    ("scenario", "start_pi"),
+    [("simulation_orin", False), ("physical_orin", False), ("physical_orin", True)],
+)
+def test_orin_entrypoint(tmp_path, scenario, start_pi):
     simulation = scenario == "simulation_orin"
     fixture = json.loads((FIXTURES / "contract.json").read_text())
     mapping = tmp_path / "mapping.json"
@@ -99,6 +102,27 @@ def test_orin_entrypoint(tmp_path, scenario):
         "startup_timeout:=15.0",
         "policy_startup_timeout:=10.0",
     ]
+    if scenario == "physical_orin" and not start_pi:
+        command.append("start_pi:=false")
+    # Exercise the real remote process/lease without connecting to hardware.
+    ssh_marker = tmp_path / "ssh.json"
+    bin_directory = tmp_path / "bin"
+    bin_directory.mkdir()
+    ssh = bin_directory / "ssh"
+    ssh.write_text(
+        "#!/usr/bin/python3\n"
+        "import json, signal, sys\n"
+        "from pathlib import Path\n"
+        f"Path({str(ssh_marker)!r}).write_text(json.dumps(sys.argv))\n"
+        "signal.signal(signal.SIGINT, lambda *_: sys.exit(0))\n"
+        "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n"
+        "for line in sys.stdin:\n    pass\n"
+    )
+    ssh.chmod(0o755)
+    launch_environment = {
+        **os.environ,
+        "PATH": str(bin_directory) + ":" + os.environ["PATH"],
+    }
     log = tmp_path / "launch.log"
     rclpy.init()
     node = rclpy.create_node("scenario_test_probe")
@@ -201,7 +225,11 @@ def test_orin_entrypoint(tmp_path, scenario):
     try:
         with log.open("w") as output:
             process = subprocess.Popen(
-                command, stdout=output, stderr=subprocess.STDOUT, start_new_session=True
+                command,
+                stdout=output,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                env=launch_environment,
             )
             deadline = time.monotonic() + 25
             while time.monotonic() < deadline:
@@ -247,6 +275,7 @@ def test_orin_entrypoint(tmp_path, scenario):
                     break
                 assert process.poll() is None, log.read_text()
             assert contracts and actions, log.read_text()
+            assert ssh_marker.exists() is start_pi, log.read_text()
             assert readiness[-1].ready and readiness[-1].verified
             assert readiness[-1].bundle_id == fixture["metadata"]["policy_sha256"]
             if simulation:

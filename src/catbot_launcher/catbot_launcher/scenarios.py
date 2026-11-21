@@ -126,6 +126,12 @@ def build_launch(default_scenario="physical_orin"):
     defaults.setdefault("enable_diagnostics", True)
     defaults.setdefault("diagnostics_stream_timeout", 2.0)
     defaults.setdefault("diagnostics_frame_timeout", 10.0)
+    defaults.setdefault("start_pi", True)
+    defaults.setdefault(
+        "remote_ros_overlay",
+        "/home/{remote_user}/.local/share/catbot/ros/install/setup.bash",
+    )
+    defaults.setdefault("remote_network_interface", "eth0")
     declarations = [
         DeclareLaunchArgument(
             "scenario", default_value=default_scenario, choices=list(SCENARIOS)
@@ -303,6 +309,35 @@ def build_launch(default_scenario="physical_orin"):
                     output="screen",
                     on_exit=Shutdown(),
                     parameters=[policy_parameters],
+                )
+            )
+        if values["start_pi"] and name == "physical_orin":
+            actions.append(
+                ExecuteProcess(
+                    output="screen",
+                    on_exit=Shutdown(),
+                    cmd=[
+                        "ros2",
+                        "run",
+                        "catbot_sim",
+                        "remote",
+                        "--role",
+                        "supervisor",
+                        "--host",
+                        values["remote_host"],
+                        "--user",
+                        values["remote_user"],
+                        "--workspace",
+                        values["remote_workspace"],
+                        "--environment",
+                        values["remote_environment"],
+                        "--ros-overlay",
+                        values["remote_ros_overlay"],
+                        "--network-interface",
+                        values["remote_network_interface"],
+                        "--mapping-file",
+                        values["remote_mapping_file"],
+                    ],
                 )
             )
         if remote_role is not None:

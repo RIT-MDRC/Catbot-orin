@@ -5,6 +5,10 @@ remote_user: catbot
 remote_workspace: /home/catbot/main
 # Sources ROS and the Pi's shared DDS exports before its workspace and nodes.
 remote_environment: /home/catbot/.config/catbot/ros_environment.bash
+# Disarm-only Pi service startup for physical_orin; opt out with start_pi:=false.
+start_pi: true
+remote_ros_overlay: '/home/{remote_user}/.local/share/catbot/ros/install/setup.bash'
+remote_network_interface: eth0
 run_id: ''
 checkpoint: ''
 policy_entity: hiromon-rochester-institute-of-technology

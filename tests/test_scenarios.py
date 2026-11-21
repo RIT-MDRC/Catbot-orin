@@ -104,18 +104,21 @@ def test_array_length_cannot_change(values):
 
 
 @pytest.mark.parametrize(
-    "scenario,camera,monitor_camera,motors",
+    "scenario,camera,monitor_camera,motors,start_pi",
     [
-        ("simulation_orin", "auto", "false", "false"),
-        ("simulation_pi", "auto", "false", "false"),
-        ("physical_orin", "auto", "true", "true"),
-        ("physical_pi", "auto", "true", "true"),
-        ("physical_orin", "false", "true", "true"),
-        ("simulation_orin", "true", "true", "false"),
+        ("simulation_orin", "auto", "false", "false", False),
+        ("simulation_orin", "auto", "false", "false", True),
+        ("simulation_pi", "auto", "false", "false", False),
+        ("simulation_pi", "auto", "false", "false", True),
+        ("physical_orin", "auto", "true", "true", True),
+        ("physical_orin", "auto", "true", "true", False),
+        ("physical_pi", "auto", "true", "true", False),
+        ("physical_orin", "false", "true", "true", False),
+        ("simulation_orin", "true", "true", "false", False),
     ],
 )
 def test_launch_applies_overrides_and_routes_workers(
-    monkeypatch, tmp_path, scenario, camera, monitor_camera, motors
+    monkeypatch, tmp_path, scenario, camera, monitor_camera, motors, start_pi
 ):
     """Execute launch assembly using controlled YAML and CLI overrides."""
     import sys
@@ -164,6 +167,7 @@ def test_launch_applies_overrides_and_routes_workers(
         "scenario": scenario,
         "run_directory": str(tmp_path),
         "enable_camera": camera,
+        "start_pi": str(start_pi).lower(),
         "imu_topic": "/custom/imu",
         "odom_topic": "/custom/odom",
         "worker_timeout": "7.5",
@@ -223,7 +227,21 @@ def test_launch_applies_overrides_and_routes_workers(
     else:
         assert "catbot_policy" not in nodes
     processes = modules["launch.actions"]["ExecuteProcess"].call_args_list
-    if scenario.endswith("orin"):
+    if scenario == "physical_orin" and start_pi:
+        assert len(processes) == 1
+        command = processes[0].kwargs["cmd"]
+        options = dict(zip(command[4::2], command[5::2], strict=True))
+        assert options == {
+            "--role": "supervisor",
+            "--host": "test-pi.local",
+            "--user": "test-user",
+            "--workspace": "/remote workspace",
+            "--environment": "/remote environment.bash",
+            "--ros-overlay": "/remote overlay/setup.bash",
+            "--network-interface": "test-eth",
+            "--mapping-file": "/remote workspace/mapping.json",
+        }
+    elif scenario.endswith("orin"):
         assert not processes
     else:
         command = processes[0].kwargs["cmd"]
