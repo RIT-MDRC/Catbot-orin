@@ -1,19 +1,25 @@
 """Launch the real scenario, both ROS adapters, and stdlib fake workers."""
 
 import json
+import math
 import os
 import signal
 import subprocess
+import threading
 import time
 from pathlib import Path
 
 import pytest
 import rclpy
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
+from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import Odometry
+from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile
+from rclpy.time import Time
 from sensor_msgs.msg import Imu
 from std_msgs.msg import String, UInt64
+from tf2_ros import StaticTransformBroadcaster
 
 from catbot_interfaces.msg import (
     ActuatorKinematicState,
@@ -57,6 +63,160 @@ def test_colcon_discovers_one_copy_of_each_shared_package(tmp_path):
         assert source.resolve() == ROOT / "external/Catbot/src" / name
 
 
+def test_vertical_camera_mount_aligns_body_cloud_and_factory_imu():
+    from catbot_sim.physical import PhysicalInputs
+    from catbot_sim.visualization import ScenePublisher
+
+    # Right lens on top, pitched down 30 degrees; explicit inputs, independent
+    # of deployment tuning. Native cloud and factory IMU frames stay camera-owned.
+    mount = [
+        0.6830127018922194,
+        -0.6830127018922193,
+        0.1830127018922193,
+        0.1830127018922193,
+    ]
+    c, s = math.cos(math.pi / 6), math.sin(math.pi / 6)
+    mapping = json.loads((FIXTURES / "contract.json").read_text())["mapping"]
+    rclpy.init()
+    node = rclpy.create_node(
+        "camera_mount_test",
+        parameter_overrides=[
+            Parameter("body_from_camera_wxyz", value=mount),
+            Parameter("body_to_camera_xyz", value=[0.3, 0.0, -0.03]),
+            Parameter("imu_mount_from_tf", value=True),
+            Parameter("ground_height_offset", value=0.35),
+            Parameter("imu_includes_gravity", value=False),
+        ],
+    )
+    node.lock = threading.Lock()
+    try:
+        inputs = PhysicalInputs(node, mapping)
+        native_tf = StaticTransformBroadcaster(node)
+
+        def transform(parent, child, position, quaternion):
+            message = TransformStamped()
+            message.header.stamp = node.get_clock().now().to_msg()
+            message.header.frame_id, message.child_frame_id = parent, child
+            (
+                message.transform.translation.x,
+                message.transform.translation.y,
+                message.transform.translation.z,
+            ) = position
+            (
+                message.transform.rotation.w,
+                message.transform.rotation.x,
+                message.transform.rotation.y,
+                message.transform.rotation.z,
+            ) = quaternion
+            return message
+
+        camera = transform("mount/odom", "mount/camera", [1.3, 2.0, -0.03], mount)
+        cloud = transform(
+            "mount/camera", "mount/cloud", [0.0, 0.04, 0.0], [1.0, 0.0, 0.0, 0.0]
+        )
+        native_tf.sendTransform([camera, cloud])
+
+        def until(predicate):
+            deadline = time.monotonic() + 5.0
+            while not predicate() and time.monotonic() < deadline:
+                rclpy.spin_once(node, timeout_sec=0.01)
+            assert predicate()
+
+        def sample():
+            stamp = node.get_clock().now().to_msg()
+            imu, odom = Imu(), Odometry()
+            imu.header.stamp = odom.header.stamp = stamp
+            imu.header.frame_id = "mount/imu"
+            # Factory IMU is rotated 90 degrees around camera Z. These sensor
+            # values describe body angular velocity [0,0,1], not camera rates.
+            imu.angular_velocity.x, imu.angular_velocity.y = -c, s
+            odom.header.frame_id, odom.child_frame_id = "mount/odom", "mount/camera"
+            (
+                odom.pose.pose.position.x,
+                odom.pose.pose.position.y,
+                odom.pose.pose.position.z,
+            ) = [1.3, 2.0, -0.03]
+            (
+                odom.pose.pose.orientation.w,
+                odom.pose.pose.orientation.x,
+                odom.pose.pose.orientation.y,
+                odom.pose.pose.orientation.z,
+            ) = mount
+            (
+                odom.twist.twist.linear.x,
+                odom.twist.twist.linear.y,
+                odom.twist.twist.linear.z,
+            ) = [0.2 * c, -0.2 * s, 0.6]
+            joints = BodyKinematicState(
+                stamp=stamp,
+                actuators=[
+                    ActuatorKinematicState(actuator_name=name, valid=True)
+                    for name in mapping["actuator_names"]
+                ],
+            )
+            for name, message in (("imu", imu), ("odom", odom), ("joints", joints)):
+                inputs.receive(name, message)
+            return inputs.snapshot([0.0, 0.0, 0.0])
+
+        until(
+            lambda: inputs.tf_buffer.can_transform(
+                "mount/camera", "mount/cloud", Time()
+            )
+        )
+        assert (
+            sample() is None
+        )  # Missing factory calibration must not silently use identity.
+        h = math.sqrt(0.5)
+        imu_tf = transform(
+            "mount/camera", "mount/imu", [0.0, 0.0, 0.0], [h, 0.0, 0.0, h]
+        )
+        native_tf.sendTransform([camera, cloud, imu_tf])
+        until(
+            lambda: inputs.tf_buffer.can_transform("mount/camera", "mount/imu", Time())
+        )
+        state = sample()
+        assert state is not None
+        assert state["qpos"][:7] == pytest.approx([1.0, 2.0, 0.35, 1.0, 0.0, 0.0, 0.0])
+        assert state["qvel"][:6] == pytest.approx([0.2, 0.3, 0.0, 0.0, 0.0, 1.0])
+        scene = {
+            "bodies": [
+                {"name": "world", "parent": 0},
+                {"name": "quadruped", "parent": 0},
+            ],
+            "geoms": [],
+        }
+        display = ScenePublisher(node, prefix="robot")
+        display.publish(
+            scene,
+            [
+                {
+                    "body": 1,
+                    "position": state["qpos"][:3],
+                    "quaternion": state["qpos"][3:7],
+                }
+            ],
+        )
+        body = "robot/body_1_quadruped"
+        until(lambda: inputs.tf_buffer.can_transform(body, "mount/cloud", Time()))
+        result = inputs.tf_buffer.lookup_transform(
+            body, "mount/cloud", Time()
+        ).transform
+        assert [
+            result.translation.x,
+            result.translation.y,
+            result.translation.z,
+        ] == pytest.approx([0.3 - 0.04 * s, 0.0, -0.03 - 0.04 * c])
+        assert [
+            result.rotation.w,
+            result.rotation.x,
+            result.rotation.y,
+            result.rotation.z,
+        ] == pytest.approx(mount)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
 @pytest.mark.parametrize(
     ("scenario", "start_pi"),
     [("simulation_orin", False), ("physical_orin", False), ("physical_orin", True)],
@@ -89,6 +249,10 @@ def test_orin_entrypoint(tmp_path, scenario, start_pi):
         f"enable_diagnostics:={str(simulation).lower()}",
         "imu_topic:=/test/imu",
         "odom_topic:=/test/odom",
+        "imu_mount_from_tf:=false",
+        "body_from_camera_wxyz:=[1.0,0.0,0.0,0.0]",
+        "body_from_imu_wxyz:=[1.0,0.0,0.0,0.0]",
+        "body_to_camera_xyz:=[0.0,0.0,0.0]",
         "orin_device:=cpu",
         "supervisor_git_commit:=test-commit",
         f"supervisor_resource_sys_root:={tmp_path / 'sys'}",

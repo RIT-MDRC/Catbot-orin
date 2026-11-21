@@ -49,3 +49,9 @@ preserving separate Pi management. The ROS test covers both paths, replacing SSH
 with a lease-reading stand-in so no hardware connection is made. Remote command
 tests execute the shared-environment/ROS-overlay chain with a harmless ros2 probe;
 the existing process-group tests cover lease expiry and descendant cleanup.
+
+The ROS mount test uses a vertical, downward-tilted camera, an independent factory
+IMU rotation, and a nonzero lever arm. It checks body pose/velocity, refuses
+missing IMU TF, and resolves the native cloud frame against the model body frame
+through their common odometry root. Mount inputs are explicit test values;
+deployment offsets can be tuned without changing the test.

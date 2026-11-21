@@ -24,6 +24,7 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("enable_camera", default_value="true"),
+            DeclareLaunchArgument("publish_imu_tf", default_value="true"),
             DeclareLaunchArgument("enable_diagnostics", default_value="true"),
             DeclareLaunchArgument(
                 "monitor_camera", default_value=LaunchConfiguration("enable_camera")
@@ -79,6 +80,7 @@ def generate_launch_description():
                     "node_log_type": "screen",
                     "enable_ipc": "false",
                     "ros_params_override_path": config_file,
+                    "publish_imu_tf": LaunchConfiguration("publish_imu_tf"),
                 }.items(),
             ),
             Node(

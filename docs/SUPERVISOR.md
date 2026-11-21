@@ -51,7 +51,8 @@ discovery settings. Then choose operations in Foxglove:
 - **Motor calibration** requests full calibration for all 12 actuators in
   parallel, then homes and arms knees, flexion, and back abduction in order. It
   moves `flf, frf` to +30 degrees, waits for clearance confirmation, then homes
-  and arms `fla, fra`. Each homing group must fully return to IDLE before arming;
+  and arms `fla, fra`, then returns `flf, frf` together to 0 degrees and waits
+  for settled measured feedback. Each homing group must fully return to IDLE before arming;
   the sequence ends in local holding with policy forwarding disabled. See the
   pinned Catbot supervisor README for the completion checks and timeouts.
   Script arming requests closed loop (state 8) only and confirms readiness; it

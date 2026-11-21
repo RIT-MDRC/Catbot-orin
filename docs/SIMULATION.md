@@ -387,12 +387,44 @@ velocity. The adapter subscribes to:
 - `contact_topic` (default `/body/state/foot_contacts`): optional `UInt8MultiArray`
   containing four 0/1 contacts in FL, FR, RL, RR order.
 
-Configure `body_from_camera_wxyz` for the odometry child frame, `body_from_imu_wxyz`
-for the IMU message frame, and `body_to_camera_xyz` for the camera lever arm in body
-coordinates. Defaults are identity rotation and zero translation; these are
-placeholders, not a measured camera mount. Base position, tilt, heading-frame
-velocity, body angular velocity and model-radian joint state are assembled using
-these transforms. Linear velocity includes the camera lever-arm correction.
+Configure `body_from_camera_wxyz` for the odometry child frame and
+`body_to_camera_xyz` for the camera lever arm in body coordinates. With
+`imu_mount_from_tf:=true` (default), the bridge composes this same camera mount
+with the ZED's factory camera-to-IMU TF, using the actual odometry child and IMU
+message frame IDs. Missing/invalid IMU TF prevents physical feedback instead of
+silently using an identity rotation. `main.launch.py` enables the ZED's
+`publish_imu_tf` option. For a different sensor setup, set
+`imu_mount_from_tf:=false` and supply `body_from_imu_wxyz` explicitly.
+
+The front ZED2i mount is configured in
+[`config/scenarios.yaml`](../src/catbot_launcher/config/scenarios.yaml):
+
+- `body_from_camera_wxyz`: **roll −90°, pitch +30°, yaw 0°**, with the camera's
+  RIGHT lens above its LEFT lens and its forward axis tilted 30° downward.
+  This is quaternion `[0.6830127, -0.6830127, 0.1830127, 0.1830127]` in **w,x,y,z**
+  order; roll is about the camera's forward axis before the body pitch.
+- `body_to_camera_xyz`: provisional **`[0.475, 0.0, 0.0]` meters** from the body
+  center: the selected model's torso front face is at +0.275 m, plus the requested
+  0.20 m forward protrusion. X is forward, Y left, Z up. Adjust Y/Z when measured.
+  The reference is `zed_camera_link` (ZED mounting point); the camera URDF keeps
+  its own center, lens/optical-frame offsets, and factory IMU calibration.
+
+Tune this file and rebuild `catbot_launcher`, or override the offset for one run:
+
+```bash
+ros2 launch catbot_launcher physical_orin.launch.py \
+  workspace:=/mnt/nvme/workspace/projects/ros2_ws \
+  body_to_camera_xyz:='[0.475, 0.0, 0.0]'
+```
+
+Base position, tilt, heading-frame velocity and body angular velocity use these
+transforms, including the camera lever-arm velocity correction. The model TF
+uses the corrected body pose. The ZED remains the sole publisher of
+`odom -> zed_camera_link`; both camera/cloud frames and `robot/world` share that
+odom root. Do not add a second `body -> zed_camera_link` TF, which would give the
+camera conflicting parents. The body-to-camera transform is already available
+through the common odom ancestor. This lets Foxglove align `/body/model` and the
+native point cloud while preserving all ZED internal transforms.
 
 `ground_height_offset` aligns odometry's vertical origin to the ground plane;
 0.35 m is a standing-height starting assumption. It is added to odometry Z after

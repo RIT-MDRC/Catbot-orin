@@ -37,6 +37,7 @@ BRIDGE_KEYS = (
     "estimate_contacts",
     "body_from_camera_wxyz",
     "body_from_imu_wxyz",
+    "imu_mount_from_tf",
     "body_to_camera_xyz",
     "imu_includes_gravity",
     "imu_topic",
@@ -132,6 +133,7 @@ def build_launch(default_scenario="physical_orin"):
         "/home/{remote_user}/.local/share/catbot/ros/install/setup.bash",
     )
     defaults.setdefault("remote_network_interface", "eth0")
+    defaults.setdefault("imu_mount_from_tf", True)
     declarations = [
         DeclareLaunchArgument(
             "scenario", default_value=default_scenario, choices=list(SCENARIOS)

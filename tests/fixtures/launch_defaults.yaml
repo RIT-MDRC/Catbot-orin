@@ -43,6 +43,7 @@ contact_height: 0.03
 estimate_contacts: false
 body_from_camera_wxyz: [1.0, 0.0, 0.0, 0.0]
 body_from_imu_wxyz: [1.0, 0.0, 0.0, 0.0]
+imu_mount_from_tf: false
 body_to_camera_xyz: [0.1, 0.2, 0.3]
 imu_includes_gravity: false
 camera_model: test-camera
