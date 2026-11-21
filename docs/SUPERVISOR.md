@@ -48,7 +48,12 @@ discovery settings. Then choose operations in Foxglove:
 
 - **Home robot** requests the ordered `home_robot` script on the Pi. It requires
   operator clearance before abduction homing and leaves homed axes armed/holding.
-- **Motor calibration** explicitly requests controller motor calibration.
+- **Motor calibration** requests full calibration for all 12 actuators in
+  parallel, then homes and arms knees, flexion, and back abduction in order. It
+  moves `flf, frf` to +30 degrees, waits for clearance confirmation, then homes
+  and arms `fla, fra`. Each homing group must fully return to IDLE before arming;
+  the sequence ends in local holding with policy forwarding disabled. See the
+  pinned Catbot supervisor README for the completion checks and timeouts.
 - **Start policy (no motor commands)** requests only the Orin `policy` job.
   It does not run any robot script, clear faults, home or arm motors.
 - **RUN — ENABLE POLICY MOTION** is a separate explicit request after the motors
