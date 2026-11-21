@@ -57,3 +57,10 @@ through their common gravity-aligned map root. It covers camera-aligned and
 gravity-aligned odometry origins, requires map-to-odom TF, and preserves real
 body tilt while correcting the reference axes. Mount inputs are explicit test values;
 deployment offsets can be tuned without changing the test.
+
+`test_camera_calibration.py` checks recovery of known camera tilt/height, retained
+unobservable components, spherical-foot geometry, noisy-floor/outlier rejection,
+depth decoding and atomic calibration files. `test_ros_camera_calibration.py`
+exercises the real ROS start/preview/save/cancel flow with synthetic depth, TF,
+encoder and supervisor publishers, including policy/fault/motion interlocks.
+It is required in the ROS CI job and does not contact physical hardware.

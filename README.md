@@ -200,6 +200,10 @@ require a separate stale-sensor stop in motion control before unattended use.
 
 ## Orin Supervisor
 
+Stationary four-foot camera mount calibration is available on the physical path.
+See [camera calibration](docs/CAMERA_CALIBRATION.md) for the start, preview and
+save controls, what can be estimated, and how to load a saved mount.
+
 The Orin-hosted physical and simulation scenarios now launch the managed Orin
 Supervisor next to the feedback bridge. Pi startup, body scripts and action
 forwarding remain on the independently launched Pi Supervisor. See

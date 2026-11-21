@@ -281,6 +281,9 @@ def test_orin_entrypoint(tmp_path, scenario, start_pi):
         "catbot_launcher",
         f"{scenario}.launch.py",
         "enable_camera:=false",
+        # The fake worker has no saved robot geometry; calibration has its own
+        # real depth/TF/service integration test.
+        "enable_camera_calibration:=false",
         "enable_foxglove:=false",
         f"enable_diagnostics:={str(simulation).lower()}",
         "imu_topic:=/test/imu",

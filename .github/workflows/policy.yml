@@ -53,7 +53,7 @@ jobs:
       - name: Install ROS test tools
         run: |
           apt-get update
-          apt-get install -y python3-pip python3-colcon-common-extensions ros-humble-geometry-msgs ros-humble-tf2-ros ros-humble-visualization-msgs ros-humble-diagnostic-msgs ros-humble-nav-msgs ros-humble-sensor-msgs
+          apt-get install -y python3-pip python3-numpy python3-colcon-common-extensions ros-humble-geometry-msgs ros-humble-tf2-ros ros-humble-visualization-msgs ros-humble-diagnostic-msgs ros-humble-nav-msgs ros-humble-sensor-msgs ros-humble-std-srvs
           python3 -m pip install pytest==8.4.2
       - name: Build adapters and generated interfaces
         shell: bash
@@ -69,7 +69,7 @@ jobs:
         run: |
           source /opt/ros/humble/setup.bash
           source install/setup.bash
-          python3 -m pytest -m ros tests/test_ros_scenario.py tests/test_ros_diagnostics.py --junitxml=ros-tests.xml
+          python3 -m pytest -m ros tests/test_ros_scenario.py tests/test_ros_diagnostics.py tests/test_ros_camera_calibration.py --junitxml=ros-tests.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -67,6 +67,13 @@ serial_number: '0'
 imu_topic: '/{camera_name}/zed_node/imu/data'
 odom_topic: '/{camera_name}/zed_node/odom'
 contact_topic: /body/state/foot_contacts
+# Explicit stationary calibration services; saving does not change a running mount.
+enable_camera_calibration: true
+camera_calibration_file: ''
+camera_calibration_output: '~/.config/catbot/camera_calibration.json'
+camera_frame: '{camera_name}_camera_link'
+depth_topic: '/{camera_name}/zed_node/depth/depth_registered'
+camera_info_topic: '/{camera_name}/zed_node/depth/camera_info'
 enable_foxglove: true
 enable_diagnostics: true
 # Health reporting thresholds, independent of the motion-control safety timeouts.
