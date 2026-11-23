@@ -17,7 +17,7 @@ from std_msgs.msg import String
 from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
 
-from catbot_interfaces.msg import BodyErrorState, BodyKinematicState
+from catbot_interfaces.msg import BodyErrorState, BodyKinematicState, SupervisorStatus
 from catbot_sim.camera_calibration import (
     depth_points,
     estimate_mount,
@@ -118,7 +118,7 @@ class CameraCalibration(Node):
                 qos_profile_sensor_data,
             ),
             ("errors", BodyErrorState, "/body/state/error", latched),
-            ("supervisor", String, "/rpi/supervisor/status", latched),
+            ("supervisor", SupervisorStatus, "/rpi/supervisor/status", latched),
         ):
             if key in ("depth", "intrinsics"):
                 self.capture_specs.append((key, cls, str(topic), qos))
@@ -158,11 +158,11 @@ class CameraCalibration(Node):
         return message
 
     def policy_stopped(self):
-        status = json.loads(self.fresh("supervisor").data)
+        status = self.fresh("supervisor")
         if (
-            status.get("orin_policy_active") is not False
-            or status.get("mode") in ("running", "ready")
-            or status.get("script")
+            status.orin_policy_active is not False
+            or status.mode in ("running", "ready")
+            or status.script
         ):
             raise ValueError(
                 "Stop policy and finish motor scripts before camera calibration"

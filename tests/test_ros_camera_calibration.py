@@ -14,11 +14,11 @@ from rclpy.executors import SingleThreadedExecutor
 from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, Image, Imu
-from std_msgs.msg import String
 from std_srvs.srv import Trigger
 from tf2_ros import StaticTransformBroadcaster
 
 from catbot_interfaces.msg import (
+    SupervisorStatus,
     ActuatorErrorState,
     ActuatorKinematicState,
     BodyErrorState,
@@ -80,7 +80,7 @@ def test_four_foot_calibration_service_preview_save_and_motion_rejection(
         "imu": (Imu, "/zed/zed_node/imu/data", qos_profile_sensor_data),
         "joints": (BodyKinematicState, "/body/state/position", qos_profile_sensor_data),
         "errors": (BodyErrorState, "/body/state/error", latched),
-        "supervisor": (String, "/rpi/supervisor/status", latched),
+        "supervisor": (SupervisorStatus, "/rpi/supervisor/status", latched),
     }
     publishers = {
         k: peer.create_publisher(cls, topic, qos)
@@ -187,14 +187,8 @@ def test_four_foot_calibration_service_preview_save_and_motion_rejection(
             "imu": imu,
             "joints": joints,
             "errors": errors,
-            "supervisor": String(
-                data=json.dumps(
-                    {
-                        "mode": "holding",
-                        "script": "",
-                        "orin_policy_active": state["policy"],
-                    }
-                )
+            "supervisor": SupervisorStatus(
+                stamp=stamp, mode="holding", orin_policy_active=state["policy"]
             ),
         }.items():
             publishers[key].publish(msg)

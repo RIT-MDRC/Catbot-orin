@@ -17,7 +17,7 @@ from tf2_ros import (
     TransformListener,
 )
 
-from catbot_interfaces.msg import BodyKinematicState
+from catbot_interfaces.msg import BodyKinematicState, SupervisorStatus
 from catbot_sim.ground import GroundFilter, ground_reference, ground_updates_allowed
 
 
@@ -147,7 +147,7 @@ class PhysicalInputs:
                 ),
                 (
                     "supervisor",
-                    String,
+                    SupervisorStatus,
                     "/rpi/supervisor/status",
                     QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL),
                 ),
@@ -197,13 +197,15 @@ class PhysicalInputs:
         """Update the same offset used by model TF and policy height, never during policy motion."""
         allowed = False
         if "supervisor" in samples:
-            try:
-                status, received = samples["supervisor"]
-                allowed = ground_updates_allowed(
-                    json.loads(status.data), now - received
-                )
-            except (ValueError, TypeError):
-                pass
+            status, received = samples["supervisor"]
+            allowed = ground_updates_allowed(
+                {
+                    "mode": status.mode,
+                    "script": status.script,
+                    "orin_policy_active": status.orin_policy_active,
+                },
+                now - received,
+            )
         if self.ground_ready and not allowed:
             if not self.ground_frozen:
                 self.ground_status.publish(

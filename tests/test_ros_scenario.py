@@ -23,6 +23,7 @@ from std_msgs.msg import String, UInt64
 from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
 
 from catbot_interfaces.msg import (
+    SupervisorStatus,
     ActuatorKinematicState,
     ActuatorPositionCommand,
     BodyKinematicState,
@@ -385,14 +386,10 @@ def test_depth_floor_updates_model_tf_and_feedback_and_freezes_during_policy(
             inputs.receive(key, msg)
         inputs.receive(
             "supervisor",
-            String(
-                data=json.dumps(
-                    {
-                        "mode": "running" if active else "holding",
-                        "orin_policy_active": active,
-                        "script": "",
-                    }
-                )
+            SupervisorStatus(
+                stamp=stamp,
+                mode="running" if active else "holding",
+                orin_policy_active=active,
             ),
         )
         if include_depth:
