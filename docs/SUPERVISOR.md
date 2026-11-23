@@ -142,3 +142,10 @@ of its last supervisor probe. Missing probes produce an actionable `Pi unavailab
 reason before clock preflight errors. This does not claim to detect electrical
 power: a disconnected network or stopped Pi supervisor has the same observation.
 Policy and motion remain blocked until fresh Pi communication is restored.
+
+Hardware kinematics now uses the pinned rollout worker's native MuJoCo projector.
+It does not initialize the training/mjlab/Warp runtime; simulation retains that
+backend. Use `device:=cpu` for the hardware projector. The contract and measured
+feedback layout are unchanged, with real producer/backend parity tests in the
+rollout repository. Policy readiness still requires actual measured feedback and
+all Pi gates; faster contract delivery does not bypass those requirements.
