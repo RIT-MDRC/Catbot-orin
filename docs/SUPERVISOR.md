@@ -135,3 +135,10 @@ physical Foundation subscribed and check on the real Orin: heartbeat/telemetry,
 preflight including skew, Pi-script-driven start/stop/restart, verified bundle ID,
 stale action degradation, probe-lease expiry, and process cleanup. A simulated
 peer does not establish physical CAN safety, camera health, or CUDA compatibility.
+
+When the Pi is powered off, launch Orin with `start_pi:=false`. Orin status now
+includes `pi.available`, `pi.state` (`waiting`, `connected`, `lost`), and the age
+of its last supervisor probe. Missing probes produce an actionable `Pi unavailable`
+reason before clock preflight errors. This does not claim to detect electrical
+power: a disconnected network or stopped Pi supervisor has the same observation.
+Policy and motion remain blocked until fresh Pi communication is restored.
