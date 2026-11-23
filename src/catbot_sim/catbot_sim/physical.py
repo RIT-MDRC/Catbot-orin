@@ -64,12 +64,17 @@ class PhysicalInputs:
         self.last_ground_attempt = float("-inf")
         self.ground_filter = GroundFilter()
         self.ground_frozen = False
+        self.blocked_reason = "Waiting for IMU, odometry and joint states"
+        self.ground_detail = "Waiting for depth ground reference"
 
         def param(name, default):
             return node.declare_parameter(name, default).value
 
         self.timeout = float(param("sensor_timeout", 0.25))
         self.skew = float(param("sensor_max_skew", 0.1))
+        # Depth processing is slower than control telemetry. Only floor fitting
+        # uses this bound; IMU/odometry/encoder freshness stays unchanged.
+        self.ground_depth_timeout = float(param("ground_depth_timeout", 0.75))
         self.height = float(param("ground_height_offset", 0.35))
         self.estimate_ground = bool(param("estimate_ground_from_depth", False))
         self.ground_ready = not self.estimate_ground
@@ -101,6 +106,7 @@ class PhysicalInputs:
                 for v in [
                     self.timeout,
                     self.skew,
+                    self.ground_depth_timeout,
                     self.height,
                     self.camera_ground_height,
                     self.threshold,
@@ -108,6 +114,7 @@ class PhysicalInputs:
                 ]
             )
             or self.timeout <= 0
+            or self.ground_depth_timeout <= 0
             or self.skew < 0
             or self.camera_ground_height < 0
             or (self.camera_ground_height > 0 and not self.camera_height_frame)
@@ -186,7 +193,7 @@ class PhysicalInputs:
         with self.node.lock:
             self.samples[name] = (message, time.monotonic())
 
-    def update_ground(self, samples, odom, body_position, now):
+    def update_ground(self, samples, odom, now):
         """Update the same offset used by model TF and policy height, never during policy motion."""
         allowed = False
         if "supervisor" in samples:
@@ -217,27 +224,44 @@ class PhysicalInputs:
             return
         self.last_ground_attempt = now
         try:
-            if any(
-                k not in samples or not 0 <= now - samples[k][1] <= self.timeout
-                for k in ("depth", "intrinsics")
-            ):
-                raise ValueError("Waiting for fresh depth and camera intrinsics")
-            image, info = samples["depth"][0], samples["intrinsics"][0]
-            stamps = [image.header.stamp, info.header.stamp, odom.header.stamp]
-            times = [s.sec + s.nanosec * 1e-9 for s in stamps]
-            ros_now = self.node.get_clock().now().nanoseconds * 1e-9
+            if "depth" not in samples or "intrinsics" not in samples:
+                raise ValueError("Waiting for depth and camera intrinsics")
+            image, received = samples["depth"]
+            info = samples["intrinsics"][0]
+            captured = Time.from_msg(image.header.stamp)
+            age = (
+                self.node.get_clock().now().nanoseconds - captured.nanoseconds
+            ) * 1e-9
             if (
-                any(
-                    t <= 0 or not -self.skew <= ros_now - t <= self.timeout
-                    for t in times
-                )
-                or max(times) - min(times) > self.skew
+                captured.nanoseconds <= 0
+                or not 0 <= now - received <= self.ground_depth_timeout
+                or not -self.skew <= age <= self.ground_depth_timeout
             ):
-                raise ValueError("Depth and robot pose timestamps disagree")
+                raise ValueError("Depth image is stale or its clock is out of sync")
+            # CameraInfo describes calibration, not a synchronized pose sample.
+            # depth_points validates its frame, dimensions and projection. Resolve
+            # every moving transform at capture time instead of comparing delayed
+            # depth against independently arriving, newer odometry/IMU messages.
             frame = self.world_frame or odom.header.frame_id
             transform = self.tf_buffer.lookup_transform(
-                frame, image.header.frame_id, Time.from_msg(image.header.stamp)
+                frame, image.header.frame_id, captured
             ).transform
+            camera = self.tf_buffer.lookup_transform(
+                frame, odom.child_frame_id, captured
+            ).transform
+            camera_q = camera.rotation
+            body_q = multiply(
+                normalized([camera_q.w, camera_q.x, camera_q.y, camera_q.z]),
+                inverse(self.camera_rotation),
+            )
+            body_position = [
+                p - o
+                for p, o in zip(
+                    xyz(camera.translation),
+                    rotate(body_q, self.camera_offset),
+                    strict=True,
+                )
+            ]
             q = transform.rotation
             imu = samples["imu"][0]
             acceleration = xyz(imu.linear_acceleration)
@@ -248,7 +272,7 @@ class PhysicalInputs:
             ):
                 raise ValueError("Stationary IMU gravity unavailable")
             imu_tf = self.tf_buffer.lookup_transform(
-                frame, imu.header.frame_id, Time.from_msg(imu.header.stamp)
+                frame, imu.header.frame_id, captured
             ).transform.rotation
             gravity_up = rotate(
                 [imu_tf.w, imu_tf.x, imu_tf.y, imu_tf.z],
@@ -279,17 +303,23 @@ class PhysicalInputs:
                 "state": "holding" if self.ground_ready else "waiting",
                 "detail": str(error),
             }
+        self.ground_detail = report.get("detail", "Ground reference ready")
         self.ground_status.publish(String(data=json.dumps(report, allow_nan=False)))
 
+    def blocked(self, reason):
+        self.blocked_reason = reason
+
     def snapshot(self, command):
-        now = time.monotonic()
         with self.node.lock:
             samples = dict(self.samples)
-        if any(
-            k not in samples or now - samples[k][1] > self.timeout
+        now = time.monotonic()
+        unavailable = [
+            k
             for k in ("imu", "odom", "joints")
-        ):
-            return None
+            if k not in samples or not 0 <= now - samples[k][1] <= self.timeout
+        ]
+        if unavailable:
+            return self.blocked("Missing or stale inputs: " + ", ".join(unavailable))
         imu, odom, joints = [samples[k][0] for k in ("imu", "odom", "joints")]
         stamps = [imu.header.stamp, odom.header.stamp, joints.stamp]
         times = [s.sec + s.nanosec * 1e-9 for s in stamps]
@@ -298,23 +328,29 @@ class PhysicalInputs:
             any(t <= 0 or not -self.skew <= ros_now - t <= self.timeout for t in times)
             or max(times) - min(times) > self.skew
         ):
-            return None
+            return self.blocked(
+                "Sensor timestamps are stale or disagree; check Pi/Orin clock sync"
+            )
         if (
             imu.angular_velocity_covariance[0] < 0
             or odom.pose.covariance[0] < 0
             or odom.twist.covariance[0] < 0
         ):
-            return None
+            return self.blocked(
+                "IMU or odometry covariance marks the measurement invalid"
+            )
         by_name = {a.actuator_name: a for a in joints.actuators}
         if len(by_name) != len(joints.actuators) or any(
             n not in by_name or not by_name[n].valid
             for n in self.mapping["actuator_names"]
         ):
-            return None
+            return self.blocked(
+                "Joint state roster is incomplete, duplicated or invalid"
+            )
         if not odom.header.frame_id or (
             self.odom_frame and odom.header.frame_id != self.odom_frame
         ):
-            return None
+            return self.blocked("Odometry frame is missing or changed")
         orientation = odom.pose.pose.orientation
         try:
             camera_q = normalized(
@@ -341,7 +377,7 @@ class PhysicalInputs:
                     )
                 ]
         except (TransformException, ValueError):
-            return None
+            return self.blocked("Waiting for world-to-odometry TF")
         if (
             self.odom_frame is None
             and not self.estimate_ground
@@ -356,11 +392,11 @@ class PhysicalInputs:
                     Time.from_msg(odom.header.stamp),
                 ).transform.translation
             except TransformException:
-                return None
+                return self.blocked("Waiting for measured camera mounting TF")
             measured_offset = rotate(camera_q, xyz(camera_to_measured))
             measured_world_z = camera_position[2] + measured_offset[2]
             if not math.isfinite(measured_world_z):
-                return None
+                return self.blocked("Measured camera height is not finite")
             self.height = self.camera_ground_height - measured_world_z
             self.node.get_logger().info(
                 f"Anchored ground from {self.camera_height_frame}: "
@@ -371,7 +407,7 @@ class PhysicalInputs:
         imu_rotation = self.imu_rotation
         if self.imu_mount_from_tf:
             if not odom.child_frame_id or not imu.header.frame_id:
-                return None
+                return self.blocked("Camera or IMU frame is missing")
             try:
                 camera_from_imu = self.tf_buffer.lookup_transform(
                     odom.child_frame_id, imu.header.frame_id, Time()
@@ -388,13 +424,13 @@ class PhysicalInputs:
                     ),
                 )
             except (TransformException, ValueError):
-                return None
+                return self.blocked("Waiting for camera-to-IMU mounting TF")
         offset_world = rotate(body_q, self.camera_offset)
         position = [p - o for p, o in zip(camera_position, offset_world, strict=True)]
         if self.estimate_ground:
-            self.update_ground(samples, odom, position, now)
+            self.update_ground(samples, odom, now)
             if not self.ground_ready:
-                return None
+                return self.blocked(self.ground_detail)
         position[2] += self.height
         angular = rotate(imu_rotation, xyz(imu.angular_velocity))
         # Odometry twist is in child_frame_id. Remove velocity due to the camera lever arm.
@@ -422,15 +458,15 @@ class PhysicalInputs:
             [*velocity_world, *angular, *velocities],
         )
         if not all(math.isfinite(v) for v in [*qpos, *qvel]):
-            return None
+            return self.blocked("Body pose or velocity is not finite")
         contacts = None
         if "contacts" in samples and now - samples["contacts"][1] <= self.timeout:
             values = list(samples["contacts"][0].data)
             if len(values) != 4 or any(v not in (0, 1) for v in values):
-                return None
+                return self.blocked("Foot contacts must contain four binary values")
             contacts = [bool(v) for v in values]
         elif not self.estimate_contacts:
-            return None
+            return self.blocked("Waiting for fresh foot contacts")
         if self.published_ground_height != self.height:
             transform = TransformStamped()
             transform.header.stamp = odom.header.stamp
@@ -456,6 +492,7 @@ class PhysicalInputs:
             min(now - self.last_snapshot, self.timeout) if self.last_snapshot else 0.001
         )
         self.last_snapshot = now
+        self.blocked_reason = None
         return {
             "sample_time": min(
                 min(samples[k][1] for k in ("imu", "odom", "joints")),

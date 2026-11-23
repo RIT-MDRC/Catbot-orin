@@ -70,3 +70,16 @@ without a manual height, rejects invalid depth and checks stopped-state gating.
 The ROS scenario suite also verifies that depth reference changes update model
 TF and body-height feedback together, freeze during policy operation, and retain
 the previous reference after rejected depth.
+
+
+Ground fitting uses depth-capture TF for optical, camera and IMU frames. A
+processed depth image may be up to `ground_depth_timeout` (default 0.75 s) old;
+CameraInfo is calibration and must match its frame, dimensions and projection,
+but need not share its timestamp. Control IMU/odometry/joint freshness remains
+unchanged. The floor region is a two-metre square centered on the historical body
+position, excluding distant scene clutter while retaining the 80% inlier, 15 mm
+RMS, broad-support and height-jump gates. Rejected initial fits block feedback;
+rejected later fits hold the last accepted reference. `/simulation/metrics`
+includes `feedback_detail` with the current input, TF or ground blocker.
+The ground ROS regression exercises delayed depth against newer control samples,
+rejects expired depth and verifies recovery without restarting the node.

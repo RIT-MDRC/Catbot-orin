@@ -140,3 +140,27 @@ def test_gravity_input_is_not_modified_by_normalization():
     )
     assert height == pytest.approx(0.4)
     assert up[2] == 9.81
+
+
+def test_floor_neighborhood_excludes_distant_clutter_but_rejects_local_occlusion(
+    monkeypatch,
+):
+    from catbot_sim import ground
+
+    image, info = depth_sample(0.4)
+    x, y = np.meshgrid(np.linspace(-0.3, 0.3, 20), np.linspace(-0.3, 0.3, 20))
+    floor = np.column_stack((x.ravel(), y.ravel(), np.full(x.size, 0.4)))
+    clutter = floor.copy()
+    clutter[:, 0] += 1.5
+    clutter[:, 2] = 0.2
+    monkeypatch.setattr(ground, "depth_points", lambda *_: np.vstack((floor, clutter)))
+    height, quality = ground.ground_reference(
+        image, info, [0, 1, 0, 0], [0, 0, 0], [0, 0, 0], gravity_up=[0, 0, 1]
+    )
+    assert height == pytest.approx(0.4)
+    assert quality["inlier_fraction"] == 1
+    clutter[:, 0] -= 1.5
+    with pytest.raises(ValueError):
+        ground.ground_reference(
+            image, info, [0, 1, 0, 0], [0, 0, 0], [0, 0, 0], gravity_up=[0, 0, 1]
+        )

@@ -38,7 +38,9 @@ def ground_reference(
     world = points @ world_rotation.T + world_position
     points = points[
         (world[:, 2] < world_position[2] - 0.08)
-        & (np.abs(world[:, 1] - body_position[1]) < 1.5)
+        # Fit the floor around the robot, not distant walls/furniture below
+        # camera height. Keep both horizontal axes bounded in world coordinates.
+        & (np.max(np.abs(world[:, :2] - body_position[:2]), axis=1) < 1.0)
     ]
     up = np.array(
         [0.0, 0.0, 1.0] if gravity_up is None else gravity_up, dtype=float, copy=True
@@ -69,7 +71,11 @@ def ground_reference(
             "rms_m": float(np.sqrt(np.mean(np.minimum(residual, 0.1) ** 2))),
         }
     if quality["inlier_fraction"] < 0.8 or quality["rms_m"] > 0.015:
-        raise ValueError("Marginal or occluded floor; holding previous reference")
+        raise ValueError(
+            "Marginal or occluded floor; holding previous reference "
+            f"(inliers {quality['inlier_fraction']:.0%}, "
+            f"RMS {quality['rms_m'] * 1000:.1f} mm)"
+        )
     world_normal = world_rotation @ normal
     if world_normal[2] < math.cos(math.radians(10)):
         raise ValueError("Observed floor is not approximately level")

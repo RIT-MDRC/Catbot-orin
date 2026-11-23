@@ -1,5 +1,6 @@
 """Launch the real scenario, both ROS adapters, and stdlib fake workers."""
 
+import copy
 import json
 import math
 import os
@@ -19,7 +20,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile
 from rclpy.time import Time
 from sensor_msgs.msg import Imu
 from std_msgs.msg import String, UInt64
-from tf2_ros import StaticTransformBroadcaster
+from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
 
 from catbot_interfaces.msg import (
     ActuatorKinematicState,
@@ -282,7 +283,10 @@ def test_vertical_camera_mount_aligns_body_cloud_and_factory_imu(
         rclpy.shutdown()
 
 
-def test_depth_floor_updates_model_tf_and_feedback_and_freezes_during_policy():
+@pytest.mark.parametrize("depth_delay", [0.0, 0.35])
+def test_depth_floor_updates_model_tf_and_feedback_and_freezes_during_policy(
+    depth_delay,
+):
     import numpy as np
     from catbot_sim.physical import PhysicalInputs
     from sensor_msgs.msg import CameraInfo, Image
@@ -301,7 +305,9 @@ def test_depth_floor_updates_model_tf_and_feedback_and_freezes_during_policy():
     )
     node.lock = threading.Lock()
     inputs = PhysicalInputs(node, mapping)
-    broadcaster = StaticTransformBroadcaster(node)
+    broadcaster = (
+        TransformBroadcaster(node) if depth_delay else StaticTransformBroadcaster(node)
+    )
 
     def spin_until(predicate):
         deadline = time.monotonic() + 3
@@ -309,7 +315,7 @@ def test_depth_floor_updates_model_tf_and_feedback_and_freezes_during_policy():
             rclpy.spin_once(node, timeout_sec=0.01)
         assert predicate()
 
-    def sample(camera_z, distance, active=False, include_depth=True):
+    def sample(camera_z, distance, active=False, include_depth=True, delay=None):
         tf = TransformStamped()
         tf.header.stamp = node.get_clock().now().to_msg()
         tf.header.frame_id = "depth/map"
@@ -318,11 +324,32 @@ def test_depth_floor_updates_model_tf_and_feedback_and_freezes_during_policy():
         tf.transform.translation.z = camera_z
         tf.transform.rotation.x = 1.0
         tf.transform.rotation.w = 0.0
-        broadcaster.sendTransform(tf)
+        if depth_delay:
+            # History brackets the delayed image but ends before the newest IMU.
+            # Querying gravity at the latest IMU stamp would extrapolate forward.
+            tf.header.stamp = Time(
+                nanoseconds=node.get_clock().now().nanoseconds - 50_000_000
+            ).to_msg()
+            older = copy.deepcopy(tf)
+            older.header.stamp = Time(
+                nanoseconds=Time.from_msg(tf.header.stamp).nanoseconds - 400_000_000
+            ).to_msg()
+            broadcaster.sendTransform([older, tf])
+        else:
+            broadcaster.sendTransform(tf)
         spin_until(
             lambda: inputs.tf_buffer.can_transform("depth/map", "depth/optical", Time())
         )
-        # Wait for the replacement static pose, not just the existing frame.
+        if depth_delay:
+            spin_until(
+                lambda: (
+                    inputs.tf_buffer.lookup_transform(
+                        "depth/map", "depth/optical", Time()
+                    ).header.stamp
+                    == tf.header.stamp
+                )
+            )
+        # Wait for the replacement pose, not just the existing frame.
         spin_until(
             lambda: (
                 abs(
@@ -370,14 +397,20 @@ def test_depth_floor_updates_model_tf_and_feedback_and_freezes_during_policy():
         )
         if include_depth:
             image = Image()
-            image.header.stamp = stamp
+            delay = depth_delay if delay is None else delay
+            image.header.stamp = Time(
+                nanoseconds=node.get_clock().now().nanoseconds - int(delay * 1e9)
+            ).to_msg()
             image.header.frame_id = "depth/optical"
             image.width = image.height = 128
             image.step = 512
             image.encoding = "32FC1"
             image.data = np.full((128, 128), distance, dtype="<f4").tobytes()
             info = CameraInfo()
-            info.header = image.header
+            info.header.frame_id = image.header.frame_id
+            # Calibration remains valid even when its publication time differs
+            # from the processed image and the latest control telemetry.
+            info.header.stamp = stamp
             info.width = info.height = 128
             info.p = [100.0, 0.0, 64.0, 0.0, 0.0, 100.0, 64.0, 0.0, 0.0, 0.0, 1.0, 0.0]
             inputs.receive("depth", image)
@@ -405,9 +438,14 @@ def test_depth_floor_updates_model_tf_and_feedback_and_freezes_during_policy():
 
     try:
         assert sample(0.13, 0.43, include_depth=False) is None
+        assert "Waiting for depth" in inputs.blocked_reason
+        time.sleep(0.55)
+        assert sample(0.13, 0.43, delay=1.0) is None
+        assert "stale" in inputs.blocked_reason
         time.sleep(0.55)
         first = sample(0.13, 0.43)
         assert first is not None
+        assert inputs.blocked_reason is None
         assert first["qpos"][2] == pytest.approx(0.38, abs=1e-6)
         assert floor_z() == pytest.approx(-0.30, abs=1e-6)
         time.sleep(0.55)

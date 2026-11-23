@@ -266,7 +266,9 @@ def test_publish_watchdogs(node, failure):
 def test_metrics(node, backend, estimate):
     node.backend = backend
     if backend == "hardware":
-        node.physical = Mock(timeout=0.25, estimate_contacts=estimate)
+        node.physical = Mock(
+            timeout=0.25, estimate_contacts=estimate, blocked_reason="Waiting for depth"
+        )
     node.metrics_started = 95
     node.sim_steps, node.sim_elapsed = 10, 0.2
     node.report_metrics()
@@ -274,6 +276,9 @@ def test_metrics(node, backend, estimate):
     assert metrics["physics_control_hz"] == 2
     assert metrics["real_time_factor"] == pytest.approx(0.04)
     assert metrics["feedback_status"] == "waiting_for_fresh_valid_inputs"
+    assert metrics["feedback_detail"] == (
+        "Waiting for depth" if backend == "hardware" else None
+    )
     node.last_feedback = node.received = 100
     node.metrics_started = 95
     node.report_metrics()

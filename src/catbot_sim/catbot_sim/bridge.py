@@ -262,6 +262,9 @@ class Bridge(WorkerProcess, Node):
                         and now - self.last_feedback
                         <= (self.physical.timeout if self.physical else self.timeout)
                         else "waiting_for_fresh_valid_inputs",
+                        "feedback_detail": getattr(
+                            self.physical, "blocked_reason", None
+                        ),
                         "contacts": "measured_or_estimated"
                         if self.physical and self.physical.estimate_contacts
                         else "measured"
