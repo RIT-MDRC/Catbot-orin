@@ -41,7 +41,7 @@ remote_policy_torch_compatibility: auto
 command_timeout: 0.25
 worker_timeout: 2.0
 feedback_timeout: 0.25
-visualization_rate: 30.0
+visualization_rate: 5.0
 startup_timeout: 120.0
 sensor_timeout: 0.25
 sensor_max_skew: 0.1

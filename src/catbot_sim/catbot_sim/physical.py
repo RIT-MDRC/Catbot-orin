@@ -6,7 +6,7 @@ import time
 
 from geometry_msgs.msg import PoseStamped, TransformStamped, Vector3Stamped
 from nav_msgs.msg import Odometry
-from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image, Imu
 from std_msgs.msg import String, UInt8MultiArray
@@ -18,7 +18,7 @@ from tf2_ros import (
 )
 
 from catbot_interfaces.msg import BodyKinematicState
-from catbot_sim.ground import ground_reference, ground_updates_allowed
+from catbot_sim.ground import GroundFilter, ground_reference, ground_updates_allowed
 
 
 def multiply(a, b):
@@ -62,6 +62,7 @@ class PhysicalInputs:
         self.last_snapshot = None
         self.published_ground_height = None
         self.last_ground_attempt = float("-inf")
+        self.ground_filter = GroundFilter()
         self.ground_frozen = False
 
         def param(name, default):
@@ -129,13 +130,13 @@ class PhysicalInputs:
                     "depth",
                     Image,
                     param("depth_topic", "/zed/zed_node/depth/depth_registered"),
-                    qos_profile_sensor_data,
+                    QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT),
                 ),
                 (
                     "intrinsics",
                     CameraInfo,
                     param("camera_info_topic", "/zed/zed_node/depth/camera_info"),
-                    qos_profile_sensor_data,
+                    QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT),
                 ),
                 (
                     "supervisor",
@@ -159,13 +160,13 @@ class PhysicalInputs:
                 message,
                 topic,
                 lambda msg, name=key: self.receive(name, msg),
-                qos_profile_sensor_data,
+                QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT),
             )
         node.create_subscription(
             UInt8MultiArray,
             str(param("contact_topic", "/body/state/foot_contacts")),
             lambda msg: self.receive("contacts", msg),
-            qos_profile_sensor_data,
+            QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT),
         )
         node.get_logger().warning(
             "Physical feedback requires calibrated camera/IMU mounting. "
@@ -238,13 +239,30 @@ class PhysicalInputs:
                 frame, image.header.frame_id, Time.from_msg(image.header.stamp)
             ).transform
             q = transform.rotation
+            imu = samples["imu"][0]
+            acceleration = xyz(imu.linear_acceleration)
+            magnitude = math.sqrt(sum(v * v for v in acceleration))
+            if (
+                imu.linear_acceleration_covariance[0] < 0
+                or not 8.5 <= magnitude <= 11.0
+            ):
+                raise ValueError("Stationary IMU gravity unavailable")
+            imu_tf = self.tf_buffer.lookup_transform(
+                frame, imu.header.frame_id, Time.from_msg(imu.header.stamp)
+            ).transform.rotation
+            gravity_up = rotate(
+                [imu_tf.w, imu_tf.x, imu_tf.y, imu_tf.z],
+                [v / magnitude for v in acceleration],
+            )
             height, quality = ground_reference(
                 image,
                 info,
                 [q.w, q.x, q.y, q.z],
                 xyz(transform.translation),
                 body_position,
+                gravity_up=gravity_up,
             )
+            height = self.ground_filter.update(height, quality)
             self.height, self.ground_ready = height, True
             reference = PoseStamped()
             reference.header.frame_id, reference.header.stamp = (

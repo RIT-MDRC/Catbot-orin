@@ -65,6 +65,7 @@ class Bridge(WorkerProcess, Node):
         self.targets = None
         self.received = None
         self.messages = queue.Queue(maxsize=1)
+        self.feedback_overwritten = 0
         self.errors = queue.Queue()
         self.request_started = None
         self.stopping = threading.Event()
@@ -169,6 +170,7 @@ class Bridge(WorkerProcess, Node):
                 self.visual_poses = payload["poses"]
         try:
             self.messages.get_nowait()
+            self.feedback_overwritten = getattr(self, "feedback_overwritten", 0) + 1
         except queue.Empty:
             pass
         self.messages.put_nowait(payload)
@@ -265,6 +267,8 @@ class Bridge(WorkerProcess, Node):
                         else "measured"
                         if self.physical
                         else "simulated",
+                        "feedback_queue_depth": self.messages.qsize(),
+                        "feedback_overwritten": self.feedback_overwritten,
                         "window_seconds": elapsed,
                         "physics_control_hz": steps / elapsed,
                         "real_time_factor": simulated / elapsed,

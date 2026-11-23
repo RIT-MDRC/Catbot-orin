@@ -508,3 +508,13 @@ unavailable ROS imports excluded; full ROS-dependent type resolution was not
 possible in this environment. No ROS nodes, simulator, camera,
 hardware, SSH workload or Foxglove session was started. Target package installation,
 calibration, DDS QoS/clock alignment and all four live scenarios remain unverified.
+
+Visualization defaults to 5 Hz independently of control feedback. High-rate
+sensor subscriptions retain only the newest sample. `/simulation/metrics` reports
+`feedback_queue_depth` and cumulative `feedback_overwritten` for the application
+queue; these are not DDS/network loss counters. Inference already runs in a
+separate worker, and ground fitting is frozen while policy motion is active.
+Idle evaluation/replay commands can be allowlisted with
+`supervisor_offline_jobs_json`; see the pinned Catbot supervisor README for the
+queue, cancellation, and resource envelope. Live shadow simulation remains gated
+on a physical A/B test showing unchanged policy and link timing.

@@ -123,3 +123,12 @@ For complete six-degree camera placement, add a surveyed target or deliberately
 varied known poses with enough independent plane orientations and a separate
 observability check. Repeating the same level stance improves averaging but
 does not reveal X/Y/yaw.
+
+Runtime floor refinement now requires a stationary IMU acceleration magnitude
+between 8.5 and 11 m/s², transforms its gravity direction at the sensor timestamp,
+and constrains the fitted plane normal to that direction. Fits below 80% inliers
+or above 15 mm RMS are held. A five-fit median and EMA (alpha 0.2) smooth accepted
+heights; changes above 50 mm are rejected. Policy-active freezes still apply.
+This compensates observed floor motion in the odometry frame while stationary;
+gravity alone cannot measure translational drift. Hardware validation of the
+IMU sign/frame and response to occlusion remains required.

@@ -67,3 +67,18 @@ def test_ground_refinement_requires_fresh_explicit_stopped_confirmation(
     status = {"mode": "holding", "orin_policy_active": False, "script": "", **changes}
     assert ground_updates_allowed(status, age) is expected
     assert not ground_updates_allowed({}, age)
+
+
+def test_filter_holds_on_occlusion_and_jumps_and_smooths_noise():
+    from catbot_sim.ground import GroundFilter
+
+    filter = GroundFilter(window=3, alpha=0.5, max_jump=0.05)
+    quality = {"inlier_fraction": 0.95, "rms_m": 0.002}
+    assert filter.update(0.4, quality) == 0.4
+    assert 0.4 < filter.update(0.42, quality) < 0.42
+    previous = filter.height
+    with pytest.raises(ValueError, match="jump"):
+        filter.update(0.6, quality)
+    with pytest.raises(ValueError, match="confidence"):
+        filter.update(0.41, {**quality, "inlier_fraction": 0.6})
+    assert filter.height == previous

@@ -10,3 +10,7 @@ supervisor_resource_sys_root: /sys
 supervisor_resource_proc_root: /proc
 supervisor_pi_lease_timeout: 0.5
 supervisor_action_timeout: 0.25
+
+supervisor_offline_jobs_json: '{}'
+supervisor_recording_directory: ~/.local/share/catbot/recordings
+supervisor_operator: ''

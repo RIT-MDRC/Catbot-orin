@@ -296,3 +296,9 @@ def test_launch_applies_overrides_and_routes_workers(
         assert options["--policy-bundle"] == "/remote workspace/bundle"
         assert options["--feedback-timeout"] == "0.6"
         assert options["--host"] == "test-pi.local"
+
+
+def test_json_job_configuration_is_literal_not_a_path_template():
+    raw = '{"eval": ["python", "-c", "print({})"]}'
+    settings = ExpandedSettings({"supervisor_offline_jobs_json": raw})
+    assert settings["supervisor_offline_jobs_json"] == raw

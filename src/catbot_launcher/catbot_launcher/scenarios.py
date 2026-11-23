@@ -95,7 +95,11 @@ class ExpandedSettings(dict):
             raise ValueError(f"Unknown or cyclic launch template: {key}")
         self.active.add(key)
         try:
-            value = self.raw[key].format_map(self)
+            value = (
+                self.raw[key]
+                if key.endswith("_json")
+                else self.raw[key].format_map(self)
+            )
         finally:
             self.active.remove(key)
         self[key] = value

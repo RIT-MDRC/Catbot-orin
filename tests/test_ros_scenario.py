@@ -337,6 +337,8 @@ def test_depth_floor_updates_model_tf_and_feedback_and_freezes_during_policy():
         stamp = node.get_clock().now().to_msg()
         imu = Imu()
         imu.header.stamp = stamp
+        imu.header.frame_id = "depth/optical"
+        imu.linear_acceleration.z = -9.81
         odom = Odometry()
         odom.header.stamp = stamp
         odom.header.frame_id = "depth/map"
@@ -410,20 +412,20 @@ def test_depth_floor_updates_model_tf_and_feedback_and_freezes_during_policy():
         assert floor_z() == pytest.approx(-0.30, abs=1e-6)
         time.sleep(0.55)
         shifted = sample(-0.07, 0.43)
-        assert shifted["qpos"][2] == pytest.approx(0.38, abs=1e-6)
-        assert floor_z() == pytest.approx(-0.50, abs=1e-6)
+        assert shifted["qpos"][2] == pytest.approx(0.18, abs=1e-6)
+        assert floor_z() == pytest.approx(-0.30, abs=1e-6)
         time.sleep(0.55)
         running = sample(-0.17, 0.43, active=True)
-        assert running["qpos"][2] == pytest.approx(0.28, abs=1e-6)
-        assert floor_z() == pytest.approx(-0.50, abs=1e-6)
+        assert running["qpos"][2] == pytest.approx(0.08, abs=1e-6)
+        assert floor_z() == pytest.approx(-0.30, abs=1e-6)
         time.sleep(0.55)
         stopped = sample(-0.17, 0.43)
-        assert stopped["qpos"][2] == pytest.approx(0.38, abs=1e-6)
-        assert floor_z() == pytest.approx(-0.60, abs=1e-6)
+        assert stopped["qpos"][2] == pytest.approx(0.08, abs=1e-6)
+        assert floor_z() == pytest.approx(-0.30, abs=1e-6)
         time.sleep(0.55)
         invalid = sample(-0.17, float("nan"))
-        assert invalid["qpos"][2] == pytest.approx(0.38, abs=1e-6)
-        assert floor_z() == pytest.approx(-0.60, abs=1e-6)
+        assert invalid["qpos"][2] == pytest.approx(0.08, abs=1e-6)
+        assert floor_z() == pytest.approx(-0.30, abs=1e-6)
     finally:
         node.destroy_node()
         rclpy.shutdown()
