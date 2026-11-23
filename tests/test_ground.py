@@ -82,3 +82,61 @@ def test_filter_holds_on_occlusion_and_jumps_and_smooths_noise():
     with pytest.raises(ValueError, match="confidence"):
         filter.update(0.41, {**quality, "inlier_fraction": 0.6})
     assert filter.height == previous
+
+
+@pytest.mark.parametrize(
+    "rms,confidence", [(float("nan"), 0.9), (-0.1, 0.9), (0.0, 1.1)]
+)
+def test_filter_rejects_invalid_quality_without_mutating_state(rms, confidence):
+    from catbot_sim.ground import GroundFilter
+
+    filter = GroundFilter()
+    with pytest.raises(ValueError):
+        filter.update(0.4, {"rms_m": rms, "inlier_fraction": confidence})
+    assert filter.height is None and not filter.values
+
+
+def test_gravity_constraint_uses_fixed_normal_without_ransac(monkeypatch):
+    from catbot_sim import ground
+
+    monkeypatch.setattr(
+        ground, "fit_ground", lambda *args: pytest.fail("redundant RANSAC")
+    )
+    image, info = depth_sample(0.4)
+    height, quality = ground.ground_reference(
+        image, info, [0, 1, 0, 0], [0, 0, 0], [0, 0, 0], gravity_up=[0, 0, 1]
+    )
+    assert height == pytest.approx(0.4)
+    assert quality["inlier_fraction"] == 1
+
+
+def test_fixed_normal_fit_rejects_occlusion_and_narrow_support(monkeypatch):
+    from catbot_sim import ground
+
+    image, info = depth_sample(0.4)
+    depth = np.full((128, 128), 0.4, dtype="<f4")
+    depth[:32] = 0.25
+    image.data = depth.tobytes()
+    with pytest.raises(ValueError, match="occluded"):
+        ground.ground_reference(
+            image, info, [0, 1, 0, 0], [0, 0, 0], [0, 0, 0], gravity_up=[0, 0, 1]
+        )
+    points = np.column_stack(
+        [np.linspace(-0.2, 0.2, 200), np.zeros(200), np.full(200, 0.4)]
+    )
+    monkeypatch.setattr(ground, "depth_points", lambda *_: points)
+    with pytest.raises(ValueError, match="span a plane"):
+        ground.ground_reference(
+            image, info, [0, 1, 0, 0], [0, 0, 0], [0, 0, 0], gravity_up=[0, 0, 1]
+        )
+
+
+def test_gravity_input_is_not_modified_by_normalization():
+    image, info = depth_sample(0.4)
+    up = np.array([0.0, 0.0, 9.81])
+    up.setflags(write=False)
+    height, _ = ground_reference(
+        image, info, [0, 1, 0, 0], [0, 0, 0], [0, 0, 0], gravity_up=up
+    )
+    assert height == pytest.approx(0.4)
+    assert up[2] == 9.81

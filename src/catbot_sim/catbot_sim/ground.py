@@ -40,15 +40,30 @@ def ground_reference(
         (world[:, 2] < world_position[2] - 0.08)
         & (np.abs(world[:, 1] - body_position[1]) < 1.5)
     ]
-    up = np.asarray([0.0, 0.0, 1.0] if gravity_up is None else gravity_up, dtype=float)
+    up = np.array(
+        [0.0, 0.0, 1.0] if gravity_up is None else gravity_up, dtype=float, copy=True
+    )
     if up.shape != (3,) or not np.isfinite(up).all() or np.linalg.norm(up) < 1e-6:
         raise ValueError("Invalid IMU gravity anchor")
     up /= np.linalg.norm(up)
-    normal, offset, quality = fit_ground(points, world_rotation.T @ up)
-    if gravity_up is not None:
+    if gravity_up is None:
+        normal, offset, quality = fit_ground(points, world_rotation.T @ up)
+    else:
+        if len(points) < 100:
+            raise ValueError("Not enough valid floor depth")
         normal = world_rotation.T @ up
         offset = -float(np.median(points @ normal))
+        if not 0.08 < offset < 1.5:
+            raise ValueError("Detected plane is not plausible ground below the camera")
         residual = np.abs(points @ normal + offset)
+        inliers = points[residual < 0.012]
+        if len(inliers) < 100:
+            raise ValueError("Not enough floor inliers")
+        centered = inliers - inliers.mean(axis=0)
+        # Preserve the broad-patch guard without an unconstrained plane fit.
+        variance = np.linalg.eigvalsh(centered.T @ centered / len(centered))
+        if variance[1] < 0.03**2:
+            raise ValueError("Ground points do not span a plane")
         quality = {
             "inlier_fraction": float(np.mean(residual < 0.012)),
             "rms_m": float(np.sqrt(np.mean(np.minimum(residual, 0.1) ** 2))),
@@ -73,7 +88,12 @@ class GroundFilter:
     """Hold the last confident plane, reject jumps, median then EMA accepted fits."""
 
     def __init__(self, window=5, alpha=0.2, max_jump=0.05):
-        if window < 1 or not 0 < alpha <= 1 or max_jump <= 0:
+        if (
+            window < 1
+            or not 0 < alpha <= 1
+            or not math.isfinite(max_jump)
+            or max_jump <= 0
+        ):
             raise ValueError("Invalid ground filter settings")
         self.values = deque(maxlen=window)
         self.alpha, self.max_jump = alpha, max_jump
@@ -85,7 +105,9 @@ class GroundFilter:
         if (
             not math.isfinite(height)
             or not math.isfinite(confidence)
-            or confidence < 0.8
+            or not 0.8 <= confidence <= 1
+            or not math.isfinite(quality["rms_m"])
+            or quality["rms_m"] < 0
             or quality["rms_m"] > 0.015
         ):
             raise ValueError("Low confidence ground fit")
