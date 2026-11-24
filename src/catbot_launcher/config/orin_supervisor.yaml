@@ -1,15 +1,15 @@
 # Orin-owned service configuration. Pi body/scripts/link limits live on the Pi.
 supervisor_run_id: ''
 supervisor_git_commit: ''
-supervisor_clock_tolerance: 0.02
+supervisor_clock_tolerance: 1.0
 supervisor_max_temperature_c: 80.0
 supervisor_min_disk_free_bytes: 1073741824
 supervisor_disk_path: /
 supervisor_compute_probe_timeout: 30.0
 supervisor_resource_sys_root: /sys
 supervisor_resource_proc_root: /proc
-supervisor_pi_lease_timeout: 0.5
-supervisor_action_timeout: 0.25
+supervisor_pi_lease_timeout: 2.0
+supervisor_action_timeout: 0.40
 
 supervisor_offline_jobs_json: '{}'
 supervisor_recording_directory: ~/.local/share/catbot/recordings
