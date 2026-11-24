@@ -190,7 +190,7 @@ def test_latest_keeps_visualization_when_feedback_is_replaced(node):
     node.visualization.publish.assert_called_once_with("scene", "poses")
 
 
-def test_hardware_visualization_requires_fresh_feedback(node):
+def test_hardware_visualization_requires_fresh_pose(node):
     node.backend = "hardware"
     node.physical = Mock(timeout=0.25)
     node.latest({"scene": "scene", "poses": "initial", "contract": {}})
@@ -198,10 +198,10 @@ def test_hardware_visualization_requires_fresh_feedback(node):
     node.publish_visualization()
     node.visualization.publish.assert_not_called()
     node.latest({"poses": "fresh"})
-    node.last_feedback = 99
+    node.last_visual_sample = 99
     node.publish_visualization()
     node.visualization.publish.assert_not_called()
-    node.last_feedback = 100
+    node.last_visual_sample = 100
     node.publish_visualization()
     node.visualization.publish.assert_called_once_with("scene", "fresh")
 
@@ -355,3 +355,26 @@ def test_main_always_closes_and_shuts_down(bridge_module, monkeypatch, failure):
     node.close.assert_called_once()
     node.destroy_node.assert_called_once()
     bridge_module.rclpy.shutdown.assert_called_once()
+
+
+def test_hardware_preview_publishes_pose_without_policy_feedback(node):
+    node.backend = "hardware"
+    node.physical = Mock(timeout=0.25)
+    node.physical.snapshot.return_value = {
+        "sample_time": 99.9,
+        "preview_only": True,
+        "command": [0, 0, 0],
+    }
+    first = json.loads(json.dumps(GOLDEN["rollout"]))
+    node.read_worker = Mock(
+        side_effect=[first, {"poses": "preview", "feedback": GOLDEN["feedback"]}]
+    )
+    node.stopping = Mock()
+    node.stopping.wait.side_effect = [False, True]
+    node.run_worker()
+    assert node.errors.empty()
+    assert node.messages.empty()
+    assert node.last_feedback is None
+    assert "preview_only" not in json.loads(node.process.stdin.getvalue())
+    node.publish_visualization()
+    node.visualization.publish.assert_called_once_with(first["scene"], "preview")

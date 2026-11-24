@@ -434,14 +434,18 @@ def test_depth_floor_updates_model_tf_and_feedback_and_freezes_during_policy(
         ).transform.translation.z
 
     try:
-        assert sample(0.13, 0.43, include_depth=False) is None
+        preview = sample(0.13, 0.43, include_depth=False)
+        assert preview["preview_only"] is True
+        assert preview["qpos"][2] == pytest.approx(0.43)
+        assert floor_z() == pytest.approx(-0.35)
         assert "Waiting for depth" in inputs.blocked_reason
         time.sleep(0.55)
-        assert sample(0.13, 0.43, delay=1.0) is None
+        assert sample(0.13, 0.43, delay=1.0)["preview_only"] is True
         assert "stale" in inputs.blocked_reason
         time.sleep(0.55)
         first = sample(0.13, 0.43)
         assert first is not None
+        assert first["preview_only"] is False
         assert inputs.blocked_reason is None
         assert first["qpos"][2] == pytest.approx(0.38, abs=1e-6)
         assert floor_z() == pytest.approx(-0.30, abs=1e-6)

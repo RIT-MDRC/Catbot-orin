@@ -431,8 +431,6 @@ class PhysicalInputs:
         position = [p - o for p, o in zip(camera_position, offset_world, strict=True)]
         if self.estimate_ground:
             self.update_ground(samples, odom, now)
-            if not self.ground_ready:
-                return self.blocked(self.ground_detail)
         position[2] += self.height
         angular = rotate(imu_rotation, xyz(imu.angular_velocity))
         # Odometry twist is in child_frame_id. Remove velocity due to the camera lever arm.
@@ -494,8 +492,13 @@ class PhysicalInputs:
             min(now - self.last_snapshot, self.timeout) if self.last_snapshot else 0.001
         )
         self.last_snapshot = now
-        self.blocked_reason = None
+        self.blocked_reason = (
+            self.ground_detail
+            if self.estimate_ground and not self.ground_ready
+            else None
+        )
         return {
+            "preview_only": self.estimate_ground and not self.ground_ready,
             "sample_time": min(
                 min(samples[k][1] for k in ("imu", "odom", "joints")),
                 now - max(ros_now - t for t in times),

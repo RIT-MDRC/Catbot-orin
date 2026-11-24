@@ -47,7 +47,8 @@ sensor_timeout: 0.25
 sensor_max_skew: 0.1
 ground_height_offset: 0.35
 # Fit depth while the policy is stopped and use the same ground for model TF and
-# policy height. The first reliable plane is required before publishing feedback.
+# policy height. Until a reliable plane is available, show only a default-aligned
+# model preview and hold policy feedback.
 estimate_ground_from_depth: true
 # Optional tape-measure override; disable depth grounding before enabling this.
 # Zero uses depth for camera mount calibration as well.

@@ -78,7 +78,8 @@ CameraInfo is calibration and must match its frame, dimensions and projection,
 but need not share its timestamp. Control IMU/odometry/joint freshness remains
 unchanged. The floor region is a two-metre square centered on the historical body
 position, excluding distant scene clutter while retaining the 80% inlier, 15 mm
-RMS, broad-support and height-jump gates. Rejected initial fits block feedback;
+RMS, broad-support and height-jump gates. Before the first accepted fit, a
+default-aligned model preview is published while policy feedback remains blocked;
 rejected later fits hold the last accepted reference. `/simulation/metrics`
 includes `feedback_detail` with the current input, TF or ground blocker.
 The ground ROS regression exercises delayed depth against newer control samples,

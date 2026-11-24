@@ -118,6 +118,7 @@ class Bridge(WorkerProcess, Node):
         )
         self.visual_scene = None
         self.visual_poses = None
+        self.last_visual_sample = None
         self.create_timer(1 / self.visualization_rate, self.publish_visualization)
         self.process = subprocess.Popen(
             spec.command,
@@ -177,8 +178,8 @@ class Bridge(WorkerProcess, Node):
 
     def publish_visualization(self):
         if self.backend == "hardware" and (
-            self.last_feedback is None
-            or time.monotonic() - self.last_feedback > self.physical.timeout
+            self.last_visual_sample is None
+            or time.monotonic() - self.last_visual_sample > self.physical.timeout
         ):
             return
         with self.lock:
@@ -215,6 +216,7 @@ class Bridge(WorkerProcess, Node):
                 if self.backend == "hardware":
                     request = self.physical.snapshot(command)
                     if request is not None:
+                        preview_only = request.pop("preview_only", False)
                         self.request_started = time.monotonic()
                         self.process.stdin.write(
                             json.dumps(request, allow_nan=False) + "\n"
@@ -222,7 +224,15 @@ class Bridge(WorkerProcess, Node):
                         self.process.stdin.flush()
                         response = self.read_worker()
                         response["sample_time"] = request["sample_time"]
-                        self.latest(response)
+                        if preview_only:
+                            with self.lock:
+                                if "poses" in response:
+                                    self.visual_poses = response["poses"]
+                                    self.last_visual_sample = request["sample_time"]
+                        else:
+                            with self.lock:
+                                self.last_visual_sample = request["sample_time"]
+                            self.latest(response)
                         self.request_started = None
                 elif targets is None:
                     # Keep the initial pose until the Pi starts responding.
