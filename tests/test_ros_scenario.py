@@ -316,7 +316,9 @@ def test_depth_floor_updates_model_tf_and_feedback_and_freezes_during_policy(
             rclpy.spin_once(node, timeout_sec=0.01)
         assert predicate()
 
-    def sample(camera_z, distance, active=False, include_depth=True, delay=None):
+    def sample(
+        camera_z, distance, active=False, include_depth=True, delay=None, joint_age=0
+    ):
         tf = TransformStamped()
         tf.header.stamp = node.get_clock().now().to_msg()
         tf.header.frame_id = "depth/map"
@@ -376,7 +378,9 @@ def test_depth_floor_updates_model_tf_and_feedback_and_freezes_during_policy(
         odom.pose.pose.orientation.x = 1.0
         odom.pose.pose.orientation.w = 0.0
         joints = BodyKinematicState(
-            stamp=stamp,
+            stamp=Time(
+                nanoseconds=Time.from_msg(stamp).nanoseconds - int(joint_age * 1e9)
+            ).to_msg(),
             actuators=[
                 ActuatorKinematicState(actuator_name=n, valid=True)
                 for n in mapping["actuator_names"]
@@ -434,6 +438,12 @@ def test_depth_floor_updates_model_tf_and_feedback_and_freezes_during_policy(
         ).transform.translation.z
 
     try:
+        active_preview = sample(0.13, 0.43, active=True)
+        assert active_preview["preview_only"] is True
+        assert not inputs.ground_ready
+        assert "Policy active" in inputs.blocked_reason
+        inputs.samples.pop("depth")
+        inputs.samples.pop("intrinsics")
         preview = sample(0.13, 0.43, include_depth=False)
         assert preview["preview_only"] is True
         assert preview["qpos"][2] == pytest.approx(0.43)
@@ -449,6 +459,13 @@ def test_depth_floor_updates_model_tf_and_feedback_and_freezes_during_policy(
         assert inputs.blocked_reason is None
         assert first["qpos"][2] == pytest.approx(0.38, abs=1e-6)
         assert floor_z() == pytest.approx(-0.30, abs=1e-6)
+        unsynced = sample(0.13, 0.43, joint_age=2177)
+        assert unsynced["preview_only"] is True
+        assert "Joint timestamp" in inputs.blocked_reason
+        assert time.monotonic() - unsynced["sample_time"] < inputs.timeout
+        recovered = sample(0.13, 0.43)
+        assert recovered["preview_only"] is False
+        assert inputs.blocked_reason is None
         time.sleep(0.55)
         shifted = sample(-0.07, 0.43)
         assert shifted["qpos"][2] == pytest.approx(0.18, abs=1e-6)

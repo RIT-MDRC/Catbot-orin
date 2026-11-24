@@ -84,3 +84,12 @@ rejected later fits hold the last accepted reference. `/simulation/metrics`
 includes `feedback_detail` with the current input, TF or ground blocker.
 The ground ROS regression exercises delayed depth against newer control samples,
 rejects expired depth and verifies recovery without restarting the node.
+
+Initial and subsequent floor fitting require fresh stopped-policy and
+no-motor-script confirmation. Until that confirmation is available, the model
+uses its existing default or last accepted floor.
+
+The physical model preview also tolerates an out-of-sync Pi joint clock when
+joint messages arrive freshly, are valid, and IMU/odometry timestamps agree.
+It uses receipt age for those joints and labels the snapshot preview-only;
+policy feedback remains blocked until the original timestamp checks pass.

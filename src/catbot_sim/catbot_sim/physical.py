@@ -206,19 +206,16 @@ class PhysicalInputs:
                 },
                 now - received,
             )
-        if self.ground_ready and not allowed:
+        if not allowed:
+            self.ground_detail = "Policy active, motor script running, or stopped-state confirmation unavailable"
             if not self.ground_frozen:
-                self.ground_status.publish(
-                    String(
-                        data=json.dumps(
-                            {
-                                "state": "frozen",
-                                "detail": "Policy active or stopped-state confirmation unavailable",
-                                "ground_world_z": -self.height,
-                            }
-                        )
-                    )
-                )
+                report = {
+                    "state": "frozen" if self.ground_ready else "waiting",
+                    "detail": self.ground_detail,
+                }
+                if self.ground_ready:
+                    report["ground_world_z"] = -self.height
+                self.ground_status.publish(String(data=json.dumps(report)))
                 self.ground_frozen = True
             return
         self.ground_frozen = False
@@ -326,13 +323,21 @@ class PhysicalInputs:
         stamps = [imu.header.stamp, odom.header.stamp, joints.stamp]
         times = [s.sec + s.nanosec * 1e-9 for s in stamps]
         ros_now = self.node.get_clock().now().nanoseconds * 1e-9
+        camera_times = times[:2]
         if (
-            any(t <= 0 or not -self.skew <= ros_now - t <= self.timeout for t in times)
-            or max(times) - min(times) > self.skew
-        ):
-            return self.blocked(
-                "Sensor timestamps are stale or disagree; check Pi/Orin clock sync"
+            any(
+                t <= 0 or not -self.skew <= ros_now - t <= self.timeout
+                for t in camera_times
             )
+            or max(camera_times) - min(camera_times) > self.skew
+        ):
+            return self.blocked("IMU or odometry timestamps are stale or disagree")
+        joint_time = times[2]
+        joint_synchronized = (
+            joint_time > 0
+            and -self.skew <= ros_now - joint_time <= self.timeout
+            and max(times) - min(times) <= self.skew
+        )
         if (
             imu.angular_velocity_covariance[0] < 0
             or odom.pose.covariance[0] < 0
@@ -492,16 +497,25 @@ class PhysicalInputs:
             min(now - self.last_snapshot, self.timeout) if self.last_snapshot else 0.001
         )
         self.last_snapshot = now
-        self.blocked_reason = (
-            self.ground_detail
-            if self.estimate_ground and not self.ground_ready
-            else None
+        preview_only = not joint_synchronized or (
+            self.estimate_ground and not self.ground_ready
         )
+        if not joint_synchronized:
+            self.blocked_reason = (
+                "Joint timestamp is stale or out of sync; check Pi/Orin clocks"
+            )
+        elif preview_only:
+            self.blocked_reason = self.ground_detail
+        else:
+            self.blocked_reason = None
+        # Receipt time is local and remains meaningful when the Pi clock is not.
+        # Never use this snapshot for policy feedback while clocks disagree.
+        age_times = camera_times if not joint_synchronized else times
         return {
-            "preview_only": self.estimate_ground and not self.ground_ready,
+            "preview_only": preview_only,
             "sample_time": min(
                 min(samples[k][1] for k in ("imu", "odom", "joints")),
-                now - max(ros_now - t for t in times),
+                now - max(ros_now - t for t in age_times),
             ),
             "version": 1,
             "qpos": qpos,
