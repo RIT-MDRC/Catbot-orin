@@ -778,3 +778,39 @@ def test_orin_entrypoint(tmp_path, scenario, start_pi):
         finally:
             node.destroy_node()
             rclpy.shutdown()
+
+
+def test_physical_snapshot_aligns_delayed_odometry_without_relaxing_freshness():
+    from catbot_sim.physical import PhysicalInputs
+    from builtin_interfaces.msg import Time as Stamp
+
+    rclpy.init()
+    node = rclpy.create_node("test_delayed_sensor_pairing")
+    node.lock = threading.Lock()
+    try:
+        inputs = PhysicalInputs(node, {"actuator_names": ["flf"], "signs": [1], "offsets_degrees": [0]})
+        now = node.get_clock().now().nanoseconds
+        captured = now - 150_000_000
+        def stamp(value):
+            return Stamp(sec=value // 1_000_000_000, nanosec=value % 1_000_000_000)
+        imu, odom = Imu(), Odometry()
+        imu.header.stamp = odom.header.stamp = stamp(captured)
+        odom.header.frame_id, odom.child_frame_id = "odom", "camera"
+        odom.pose.pose.orientation.w = 1.0
+        joints = BodyKinematicState(stamp=stamp(captured), actuators=[ActuatorKinematicState(actuator_name="flf", valid=True, position_degrees=2.0)])
+        for name, message in (("imu", imu), ("joints", joints), ("odom", odom)):
+            inputs.receive(name, message)
+        newer_imu = Imu()
+        newer_imu.header.stamp = stamp(now)
+        inputs.receive("imu", newer_imu)
+        inputs.receive("joints", BodyKinematicState(stamp=stamp(now), actuators=[ActuatorKinematicState(actuator_name="flf", valid=True, position_degrees=10.0)]))
+        result = inputs.snapshot([0.0, 0.0, 0.0])
+        assert result is not None
+        assert not result["preview_only"]
+        assert result["qpos"][-1] == pytest.approx(math.radians(2))
+        odom.header.stamp = stamp(now - 1_000_000_000)
+        inputs.receive("odom", odom)
+        assert inputs.snapshot([0.0, 0.0, 0.0]) is None
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()

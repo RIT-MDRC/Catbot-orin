@@ -271,6 +271,7 @@ class Bridge(WorkerProcess, Node):
                         if self.last_feedback is not None
                         and now - self.last_feedback
                         <= (self.physical.timeout if self.physical else self.timeout)
+                        and not getattr(self.physical, "blocked_reason", None)
                         else "waiting_for_fresh_valid_inputs",
                         "feedback_detail": getattr(
                             self.physical, "blocked_reason", None

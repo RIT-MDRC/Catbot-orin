@@ -3,6 +3,7 @@
 import json
 import math
 import time
+from collections import deque
 
 from geometry_msgs.msg import PoseStamped, TransformStamped, Vector3Stamped
 from nav_msgs.msg import Odometry
@@ -19,6 +20,7 @@ from tf2_ros import (
 
 from catbot_interfaces.msg import BodyKinematicState, SupervisorStatus
 from catbot_sim.ground import GroundFilter, ground_reference, ground_updates_allowed
+from catbot_sim.sensor_timing import align_samples
 
 
 def multiply(a, b):
@@ -57,6 +59,7 @@ class PhysicalInputs:
     def __init__(self, node, mapping):
         self.node, self.mapping = node, mapping
         self.samples = {}
+        self.sample_history = {name: deque(maxlen=128) for name in ("imu", "joints")}
         self.world_tf = StaticTransformBroadcaster(node)
         self.odom_frame = None
         self.last_snapshot = None
@@ -191,7 +194,10 @@ class PhysicalInputs:
 
     def receive(self, name, message):
         with self.node.lock:
-            self.samples[name] = (message, time.monotonic())
+            sample = (message, time.monotonic())
+            self.samples[name] = sample
+            if name in self.sample_history:
+                self.sample_history[name].append(sample)
 
     def update_ground(self, samples, odom, now):
         """Update the same offset used by model TF and policy height, never during policy motion."""
@@ -311,7 +317,9 @@ class PhysicalInputs:
     def snapshot(self, command):
         with self.node.lock:
             samples = dict(self.samples)
+            history = {name: tuple(values) for name, values in self.sample_history.items()}
         now = time.monotonic()
+        samples = align_samples(samples, history, now, self.timeout)
         unavailable = [
             k
             for k in ("imu", "odom", "joints")
