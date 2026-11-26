@@ -21,9 +21,10 @@ a reboot, lost reference, or encoder fault requires separate diagnosis.
    mechanism permits this safely. Do not disable the switch or command motion
    farther into the stop. Clear requests cannot repair an active physical cause.
 3. Call `/rpi/supervisor/recover` (`std_srvs/srv/Trigger`, request `{}`). The
-   supervisor sends Clear_Errors to every configured motor controller, waits for a fresh fault-free report, and clears the motion
-   latch. No separate `/body/control/motor` call is needed. Persistent motor
-   faults and missing feedback keep recovery blocked. Wait for
+   supervisor sends Clear_Errors to every configured motor controller, waits for fresh feedback, and applies the original recovery checks to clear the motion
+   latch. No separate `/body/control/motor` call is needed. Missing feedback keeps recovery blocked; a local fault stop that retains
+   healthy holds also requires fault-free reports. Operator-stop recovery leaves
+   all motors disarmed; persistent hardware faults still block later motion. Wait for
    idle status; recovery does not arm axes or move them.
 4. When ready to enable holding torque, call `/rpi/supervisor/script`
    (`catbot_interfaces/srv/RunScript`) with `{name: clear_errors}`.
