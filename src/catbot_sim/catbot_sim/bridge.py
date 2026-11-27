@@ -65,6 +65,7 @@ class Bridge(WorkerProcess, Node):
         self.targets = None
         self.received = None
         self.messages = queue.Queue(maxsize=1)
+        self.feedback_overwritten = 0
         self.errors = queue.Queue()
         self.request_started = None
         self.stopping = threading.Event()
@@ -117,6 +118,7 @@ class Bridge(WorkerProcess, Node):
         )
         self.visual_scene = None
         self.visual_poses = None
+        self.last_visual_sample = None
         self.create_timer(1 / self.visualization_rate, self.publish_visualization)
         self.process = subprocess.Popen(
             spec.command,
@@ -169,14 +171,15 @@ class Bridge(WorkerProcess, Node):
                 self.visual_poses = payload["poses"]
         try:
             self.messages.get_nowait()
+            self.feedback_overwritten = getattr(self, "feedback_overwritten", 0) + 1
         except queue.Empty:
             pass
         self.messages.put_nowait(payload)
 
     def publish_visualization(self):
         if self.backend == "hardware" and (
-            self.last_feedback is None
-            or time.monotonic() - self.last_feedback > self.physical.timeout
+            self.last_visual_sample is None
+            or time.monotonic() - self.last_visual_sample > self.physical.timeout
         ):
             return
         with self.lock:
@@ -213,6 +216,7 @@ class Bridge(WorkerProcess, Node):
                 if self.backend == "hardware":
                     request = self.physical.snapshot(command)
                     if request is not None:
+                        preview_only = request.pop("preview_only", False)
                         self.request_started = time.monotonic()
                         self.process.stdin.write(
                             json.dumps(request, allow_nan=False) + "\n"
@@ -220,7 +224,15 @@ class Bridge(WorkerProcess, Node):
                         self.process.stdin.flush()
                         response = self.read_worker()
                         response["sample_time"] = request["sample_time"]
-                        self.latest(response)
+                        if preview_only:
+                            with self.lock:
+                                if "poses" in response:
+                                    self.visual_poses = response["poses"]
+                                    self.last_visual_sample = request["sample_time"]
+                        else:
+                            with self.lock:
+                                self.last_visual_sample = request["sample_time"]
+                            self.latest(response)
                         self.request_started = None
                 elif targets is None:
                     # Keep the initial pose until the Pi starts responding.
@@ -259,12 +271,18 @@ class Bridge(WorkerProcess, Node):
                         if self.last_feedback is not None
                         and now - self.last_feedback
                         <= (self.physical.timeout if self.physical else self.timeout)
+                        and not getattr(self.physical, "blocked_reason", None)
                         else "waiting_for_fresh_valid_inputs",
+                        "feedback_detail": getattr(
+                            self.physical, "blocked_reason", None
+                        ),
                         "contacts": "measured_or_estimated"
                         if self.physical and self.physical.estimate_contacts
                         else "measured"
                         if self.physical
                         else "simulated",
+                        "feedback_queue_depth": self.messages.qsize(),
+                        "feedback_overwritten": self.feedback_overwritten,
                         "window_seconds": elapsed,
                         "physics_control_hz": steps / elapsed,
                         "real_time_factor": simulated / elapsed,

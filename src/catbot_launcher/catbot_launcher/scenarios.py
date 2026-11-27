@@ -11,6 +11,8 @@ import yaml
 from catbot_policy.artifacts import available_models, resolve_downloaded
 from catbot_policy.configuration import POLICY_PARAMETERS
 from catbot_policy.worker_launch import WorkerLaunchSpec
+from catbot_supervisor.rpi_configuration import RPI_DEFAULTS
+from foundation.configuration import FOUNDATION_DEFAULTS
 
 SCENARIOS = {
     "physical_pi": ("hardware", "pi", "both"),
@@ -33,10 +35,17 @@ BRIDGE_KEYS = (
     "sensor_timeout",
     "sensor_max_skew",
     "ground_height_offset",
+    "estimate_ground_from_depth",
+    "depth_topic",
+    "camera_info_topic",
+    "camera_ground_height",
+    "camera_height_frame",
     "contact_height",
     "estimate_contacts",
     "body_from_camera_wxyz",
     "body_from_imu_wxyz",
+    "world_frame",
+    "imu_mount_from_tf",
     "body_to_camera_xyz",
     "imu_includes_gravity",
     "imu_topic",
@@ -88,7 +97,11 @@ class ExpandedSettings(dict):
             raise ValueError(f"Unknown or cyclic launch template: {key}")
         self.active.add(key)
         try:
-            value = self.raw[key].format_map(self)
+            value = (
+                self.raw[key]
+                if key.endswith("_json")
+                else self.raw[key].format_map(self)
+            )
         finally:
             self.active.remove(key)
         self[key] = value
@@ -126,6 +139,35 @@ def build_launch(default_scenario="physical_orin"):
     defaults.setdefault("enable_diagnostics", True)
     defaults.setdefault("diagnostics_stream_timeout", 2.0)
     defaults.setdefault("diagnostics_frame_timeout", 10.0)
+    defaults.setdefault("start_pi", True)
+    defaults.setdefault(
+        "remote_ros_overlay",
+        "/home/{remote_user}/.local/share/catbot/ros/install/setup.bash",
+    )
+    defaults.setdefault("remote_network_interface", "eth0")
+    pi_defaults = {
+        **RPI_DEFAULTS,
+        **FOUNDATION_DEFAULTS,
+        "hardware_config_file": "",
+        "protocol_config_file": "",
+    }
+    for key, value in pi_defaults.items():
+        defaults.setdefault("rpi_" + key, value)
+    defaults.setdefault("imu_mount_from_tf", True)
+    defaults.setdefault("world_frame", "map")
+    defaults.setdefault("camera_ground_height", 0.0)
+    defaults.setdefault("estimate_ground_from_depth", False)
+    defaults.setdefault("camera_height_frame", "{camera_name}_camera_center")
+    defaults.setdefault("enable_camera_calibration", True)
+    defaults.setdefault("camera_calibration_file", "")
+    defaults.setdefault(
+        "camera_calibration_output", "~/.config/catbot/camera_calibration.json"
+    )
+    defaults.setdefault("camera_frame", "{camera_name}_camera_link")
+    defaults.setdefault("depth_topic", "/{camera_name}/zed_node/depth/depth_registered")
+    defaults.setdefault(
+        "camera_info_topic", "/{camera_name}/zed_node/depth/camera_info"
+    )
     declarations = [
         DeclareLaunchArgument(
             "scenario", default_value=default_scenario, choices=list(SCENARIOS)
@@ -179,6 +221,15 @@ def build_launch(default_scenario="physical_orin"):
             "policy_worker_project",
         ):
             values[key] = str(Path(values[key]).expanduser())
+        if values["camera_calibration_file"]:
+            from catbot_sim.camera_calibration import load_calibration
+
+            values.update(
+                load_calibration(
+                    values["camera_calibration_file"],
+                    (Path(values["run_directory"]) / "model.xml").read_text(),
+                )
+            )
         for device, project, environment, sync in (
             ("device", "rollout_repository", "worker_environment", "worker_sync"),
             (
@@ -240,6 +291,33 @@ def build_launch(default_scenario="physical_orin"):
                 }.items(),
             )
         ]
+        if backend == "hardware" and values["enable_camera_calibration"]:
+            actions.append(
+                Node(
+                    package="catbot_sim",
+                    executable="camera_calibration",
+                    output="screen",
+                    parameters=[
+                        {
+                            key: values[key]
+                            for key in (
+                                "run_directory",
+                                "mapping_file",
+                                "body_from_camera_wxyz",
+                                "body_to_camera_xyz",
+                                "world_frame",
+                                "camera_frame",
+                                "depth_topic",
+                                "camera_info_topic",
+                                "imu_topic",
+                                "camera_calibration_output",
+                                "camera_ground_height",
+                                "camera_height_frame",
+                            )
+                        }
+                    ],
+                )
+            )
         actions.append(
             Node(
                 package="catbot_sim",
@@ -252,41 +330,87 @@ def build_launch(default_scenario="physical_orin"):
             )
         )
         if policy_host == "orin":
+            policy_parameters = {
+                **{
+                    key: values[key]
+                    for key in POLICY_PARAMETERS
+                    if key != "simulation_mode"
+                },
+                "simulation_mode": backend == "simulation",
+                "policy_python": ParameterValue(
+                    values["policy_python"], value_type=str
+                ),
+                "policy_worker_environment": ParameterValue(
+                    values["policy_worker_environment"], value_type=str
+                ),
+                "policy_worker_sync": ParameterValue(
+                    values["policy_worker_sync"], value_type=str
+                ),
+            }
+            if backend == "simulation":
+                # All-local simulation has no Pi lease or action-forwarding peer.
+                policy_parameters.update(
+                    supervised_actions=False,
+                    require_provider_contract=True,
+                    provider_contract_topic="/policy/contract",
+                )
+            else:
+                policy_parameters.update(
+                    {
+                        "scenario": name,
+                        **{
+                            key.removeprefix("supervisor_"): values[key]
+                            for key in values
+                            if key.startswith("supervisor_")
+                            and key
+                            not in ("supervisor_run_id", "supervisor_git_commit")
+                        },
+                        "supervisor_run_id": values["supervisor_run_id"],
+                        "git_commit": values["supervisor_git_commit"],
+                    }
+                )
             actions.append(
                 Node(
-                    package="catbot_supervisor",
-                    executable="orin",
+                    package=(
+                        "catbot_policy"
+                        if backend == "simulation"
+                        else "catbot_supervisor"
+                    ),
+                    executable="policy" if backend == "simulation" else "orin",
                     prefix=shlex.quote(values["policy_ros_python"]),
                     output="screen",
                     on_exit=Shutdown(),
-                    parameters=[
-                        {
-                            **{
-                                key: values[key]
-                                for key in POLICY_PARAMETERS
-                                if key != "simulation_mode"
-                            },
-                            "simulation_mode": backend == "simulation",
-                            "scenario": name,
-                            **{
-                                key.removeprefix("supervisor_"): values[key]
-                                for key in values
-                                if key.startswith("supervisor_")
-                                and key
-                                not in ("supervisor_run_id", "supervisor_git_commit")
-                            },
-                            "supervisor_run_id": values["supervisor_run_id"],
-                            "git_commit": values["supervisor_git_commit"],
-                            "policy_python": ParameterValue(
-                                values["policy_python"], value_type=str
-                            ),
-                            "policy_worker_environment": ParameterValue(
-                                values["policy_worker_environment"], value_type=str
-                            ),
-                            "policy_worker_sync": ParameterValue(
-                                values["policy_worker_sync"], value_type=str
-                            ),
-                        }
+                    parameters=[policy_parameters],
+                )
+            )
+        if values["start_pi"] and name == "physical_orin":
+            actions.append(
+                ExecuteProcess(
+                    output="screen",
+                    on_exit=Shutdown(),
+                    cmd=[
+                        "ros2",
+                        "run",
+                        "catbot_sim",
+                        "remote",
+                        "--role",
+                        "supervisor",
+                        "--host",
+                        values["remote_host"],
+                        "--user",
+                        values["remote_user"],
+                        "--workspace",
+                        values["remote_workspace"],
+                        "--environment",
+                        values["remote_environment"],
+                        "--ros-overlay",
+                        values["remote_ros_overlay"],
+                        "--network-interface",
+                        values["remote_network_interface"],
+                        "--mapping-file",
+                        values["remote_mapping_file"],
+                        "--rpi-launch-arguments",
+                        json.dumps({key: values["rpi_" + key] for key in pi_defaults}),
                     ],
                 )
             )

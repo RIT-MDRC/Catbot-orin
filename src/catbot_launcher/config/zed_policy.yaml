@@ -12,6 +12,7 @@
     pos_tracking:
       pos_tracking_enabled: true
       imu_fusion: true
+      set_gravity_as_origin: true
       publish_tf: true
       publish_map_tf: true
     depth:

@@ -33,6 +33,18 @@ rollout. The adapter needs the same model/configuration as the policy to compute
 foot history and render measured joint positions. Simulation launches omit the
 camera by default. Every launch includes exactly one Foxglove bridge.
 
+`simulation_orin` starts the policy automatically and sends its actuator commands
+directly to the simulator after validating `/policy/contract`. It needs no Pi
+connection or supervisor job request. `physical_orin` uses the Orin supervisor
+and retains the Pi lease, preflight and explicit policy-start requirements.
+`physical_orin` also starts the Pi's disarmed Foundation/supervisor services over
+SSH by default; use `start_pi:=false` when they are already managed separately.
+The Pi must already be built, with passwordless SSH and its shared ROS/DDS
+environment configured. `remote_ros_overlay` selects its built ROS overlay and
+defaults to the CLI-managed install. `remote_network_interface` defaults to `eth0`.
+Stopping the launch shuts down the remote services through the SSH lease.
+Simulation scenarios never start Pi hardware services through this option.
+
 ## Defaults and overrides
 
 The checked-in `src/catbot_launcher/config/scenarios.yaml` holds shared values.
@@ -180,22 +192,43 @@ a warning because uncommitted training code cannot be recovered from the SHA.
 
 ## One policy implementation on either machine
 
-Orin's `src/catbot_policy/catbot_policy` is a symlink to the pinned
-`external/Catbot/src/catbot_policy/catbot_policy` source. Its lightweight ament
-wrapper installs that source without requiring foundation/CAN on Orin. No policy
-logic is copied. The Pi uses the same package in Catbot. Keep Pi deployment and
-Orin's Catbot gitlink aligned when changing policy interfaces.
+Orin's `src/catbot_interfaces`, `src/catbot_policy`, `src/foundation`, and
+`src/catbot_supervisor` are package-directory symlinks into the pinned
+`external/Catbot/src` tree. The copied interface definitions and policy packaging
+wrapper have been removed. Normal colcon discovery builds each package once,
+using the same source paths as CI. Foundation is installed for supervisor imports;
+building it does not start hardware or install the separate inference workers.
+The Pi uses the same packages in Catbot. Keep Pi deployment and Orin's Catbot
+gitlink aligned when changing policy interfaces.
 
 ```bash
 git submodule update --init external/Catbot external/catbot_sim_rollout
 # On Orin: install locked simulator/kinematics dependencies in separate Python 3.14
 uv sync --locked --project external/catbot_sim_rollout
 source /opt/ros/humble/setup.bash
-colcon build --symlink-install --packages-select catbot_interfaces catbot_policy catbot_sim catbot_launcher
+colcon build --symlink-install
 source install/setup.bash
 ```
 
-`external/COLCON_IGNORE` prevents colcon traversing either external project.
+`external/COLCON_IGNORE` prevents a second recursive discovery of the external
+projects; the `src/` links expose only the required shared ROS packages. Always
+build from this workspace root instead of selecting the external paths with
+`--base-paths`.
+
+When upgrading an existing workspace that was built using the external paths,
+clear the interfaces' generated build directory once before rebuilding:
+
+```bash
+rm -rf build/catbot_interfaces
+colcon build --symlink-install
+source install/setup.bash
+```
+
+This directory contains generated CMake/interface build files. Removing it lets
+CMake configure against `src/catbot_interfaces`; policy artifacts, simulator
+environments and installed packages are preserved. Subsequent builds use plain
+`colcon build --symlink-install` with the same source paths.
+
 Install the ROS package dependencies, including `nav_msgs`, `sensor_msgs`,
 `tf2_ros`, `visualization_msgs`, and Python YAML. The ROS adapter requires no
 PyTorch installation. Its interpreter must match ROS Humble's Python ABI and see
@@ -354,16 +387,65 @@ velocity. The adapter subscribes to:
 - `contact_topic` (default `/body/state/foot_contacts`): optional `UInt8MultiArray`
   containing four 0/1 contacts in FL, FR, RL, RR order.
 
-Configure `body_from_camera_wxyz` for the odometry child frame, `body_from_imu_wxyz`
-for the IMU message frame, and `body_to_camera_xyz` for the camera lever arm in body
-coordinates. Defaults are identity rotation and zero translation; these are
-placeholders, not a measured camera mount. Base position, tilt, heading-frame
-velocity, body angular velocity and model-radian joint state are assembled using
-these transforms. Linear velocity includes the camera lever-arm correction.
+Configure `body_from_camera_wxyz` for the odometry child frame and
+`body_to_camera_xyz` for the camera lever arm in body coordinates. With
+`imu_mount_from_tf:=true` (default), the bridge composes this same camera mount
+with the ZED's factory camera-to-IMU TF, using the actual odometry child and IMU
+message frame IDs. Missing/invalid IMU TF prevents physical feedback instead of
+silently using an identity rotation. `main.launch.py` enables the ZED's
+`publish_imu_tf` option. For a different sensor setup, set
+`imu_mount_from_tf:=false` and supply `body_from_imu_wxyz` explicitly.
 
-`ground_height_offset` aligns odometry's vertical origin to the ground plane;
-0.35 m is a standing-height starting assumption. It is added to odometry Z after
-the mount correction. Calibrate this for the actual startup origin/terrain.
+The front ZED2i mount is configured in
+[`config/scenarios.yaml`](../src/catbot_launcher/config/scenarios.yaml):
+
+- `body_from_camera_wxyz`: **roll −90°, pitch +30°, yaw 0°**, with the camera's
+  RIGHT lens above its LEFT lens and its forward axis tilted 30° downward.
+  This is quaternion `[0.6830127, -0.6830127, 0.1830127, 0.1830127]` in **w,x,y,z**
+  order; roll is about the camera's forward axis before the body pitch.
+- `body_to_camera_xyz`: provisional **`[0.475, 0.0, 0.0]` meters** from the body
+  center: the selected model's torso front face is at +0.275 m, plus the requested
+  0.20 m forward protrusion. X is forward, Y left, Z up. Adjust Y/Z when measured.
+  The reference is `zed_camera_link` (ZED mounting point); the camera URDF keeps
+  its own center, lens/optical-frame offsets, and factory IMU calibration.
+
+Tune this file and rebuild `catbot_launcher`, or override the offset for one run:
+
+```bash
+ros2 launch catbot_launcher physical_orin.launch.py \
+  workspace:=/mnt/nvme/workspace/projects/ros2_ws \
+  body_to_camera_xyz:='[0.475, 0.0, 0.0]'
+```
+
+Base position, tilt, heading-frame velocity and body angular velocity use these
+transforms, including the camera lever-arm velocity correction. The model TF
+uses the corrected body pose. `world_frame:=map` selects ZED's gravity-aligned
+map as the reference for body position, orientation, velocity and the ground
+plane. The bridge transforms each odometry pose at its message timestamp through
+`map -> odom` before applying the mount correction. ZED initializes local odom
+at the camera's starting pose, so its axes can be rolled/pitched with the mount;
+treating those axes as gravity-aligned would lay the body on its side. Missing
+map-to-odom TF prevents feedback until that transform is available. The ZED
+profile explicitly enables `set_gravity_as_origin`.
+
+The ZED remains the sole publisher of `odom -> zed_camera_link`; camera/cloud
+frames and `robot/world` share the gravity-aligned map root. Do not add a second
+`body -> zed_camera_link` TF, which would give the camera conflicting parents.
+The body-to-camera transform is already available
+through the common map ancestor. This lets Foxglove align `/body/model` and the
+native point cloud while preserving all ZED internal transforms.
+
+`estimate_ground_from_depth:=true` fits the depth floor and applies its height
+beneath the body to both `robot/world` TF and policy feedback. It waits for an
+initial reliable plane, then refines it at up to 2 Hz while the Pi confirms policy
+is stopped and no script is active. It freezes the established reference during
+policy operation and holds the last valid value when depth is rejected. Inspect
+`/camera/ground/reference` and `/camera/ground/status`. No 43 cm input is required:
+`camera_ground_height` defaults to zero so mount calibration also measures height
+from depth. For an optional tape-measure reference, disable depth grounding and
+set `camera_ground_height` at `camera_height_frame`. With both disabled,
+`ground_height_offset` is a fixed fallback. The floor remains horizontal in the
+gravity-aligned world, consistent with the current flat-ground contact model.
 `estimate_contacts:=true` permits flat-ground geometric contact estimates when a
 fresh contact topic is absent: foot sphere bottoms within `contact_height` (0.02 m)
 of that plane count as contact. Use `estimate_contacts:=false` to require measured
@@ -389,9 +471,12 @@ hardware behavior. The physical adapter never synthesizes encoder readiness.
 
 Connect to `ws://<orin-ip>:8765`, add a 3D panel and enable `/body/model`.
 For simulations select `sim/world`. For physical scenarios select `robot/world`
-or the camera's map/odom root: `robot/world` is connected below the received odom
-frame using the configured ground-height offset. Body transforms are derived
-from measured encoders and base pose, never merely the commanded targets.
+as the 3D panel's fixed frame (or `map` to use the camera's gravity-aligned root).
+`robot/world` is connected below `world_frame` using the configured ground-height
+offset. Use `world_frame:=your_map_frame` with a custom ZED map frame name; an
+empty value retains the received odometry frame for an already gravity-aligned
+non-ZED source. Body transforms are derived from measured encoders and base pose,
+never merely the commanded targets.
 
 The saved model provides primitive geometry and colors; capsules are rendered
 with cylinders and spheres. Infinite ground is shown as a finite patch. Textures
@@ -423,3 +508,13 @@ unavailable ROS imports excluded; full ROS-dependent type resolution was not
 possible in this environment. No ROS nodes, simulator, camera,
 hardware, SSH workload or Foxglove session was started. Target package installation,
 calibration, DDS QoS/clock alignment and all four live scenarios remain unverified.
+
+Visualization defaults to 5 Hz independently of control feedback. High-rate
+sensor subscriptions retain only the newest sample. `/simulation/metrics` reports
+`feedback_queue_depth` and cumulative `feedback_overwritten` for the application
+queue; these are not DDS/network loss counters. Inference already runs in a
+separate worker, and ground fitting is frozen while policy motion is active.
+Idle evaluation/replay commands can be allowlisted with
+`supervisor_offline_jobs_json`; see the pinned Catbot supervisor README for the
+queue, cancellation, and resource envelope. Live shadow simulation remains gated
+on a physical A/B test showing unchanged policy and link timing.

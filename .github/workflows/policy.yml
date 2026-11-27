@@ -17,7 +17,7 @@ jobs:
           cache-dependency-glob: '**/tests/uv.lock'
       - name: Existing foundation and UI tests
         working-directory: external/Catbot
-        run: uv run --locked --group dev python -m pytest src/foundation/test/test_actuator.py src/foundation/test/test_body_control.py src/foundation/test/test_body_state.py src/foundation/test/test_odrive_position.py src/ui/test/test_policy_commands.py src/foundation/test/test_body_io.py src/catbot_supervisor/test --junitxml=foundation-tests.xml
+        run: uv run --locked --group dev python -m pytest src/foundation/test/test_actuator.py src/foundation/test/test_body_control.py src/foundation/test/test_body_state.py src/foundation/test/test_heartbeat_diagnostics.py src/foundation/test/test_odrive_position.py src/ui/test/test_policy_commands.py src/foundation/test/test_body_io.py src/catbot_supervisor/test --junitxml=foundation-tests.xml
       - name: Catbot policy suite and coverage floors
         working-directory: external/Catbot/
         run: |
@@ -53,13 +53,13 @@ jobs:
       - name: Install ROS test tools
         run: |
           apt-get update
-          apt-get install -y python3-pip python3-colcon-common-extensions ros-humble-geometry-msgs ros-humble-tf2-ros ros-humble-visualization-msgs ros-humble-diagnostic-msgs ros-humble-nav-msgs ros-humble-sensor-msgs
+          apt-get install -y python3-pip python3-numpy python3-colcon-common-extensions ros-humble-geometry-msgs ros-humble-tf2-ros ros-humble-visualization-msgs ros-humble-diagnostic-msgs ros-humble-nav-msgs ros-humble-sensor-msgs ros-humble-std-srvs
           python3 -m pip install pytest==8.4.2
       - name: Build adapters and generated interfaces
         shell: bash
         run: |
           source /opt/ros/humble/setup.bash
-          colcon build --base-paths external/Catbot/src/catbot_interfaces external/Catbot/src/catbot_policy external/Catbot/src/foundation external/Catbot/src/catbot_supervisor src/catbot_sim src/catbot_launcher --cmake-args -DBUILD_TESTING=OFF
+          colcon build --cmake-args -DBUILD_TESTING=OFF
       - name: ROS integration tests (required, no import skips)
         shell: bash
         env:
@@ -69,7 +69,7 @@ jobs:
         run: |
           source /opt/ros/humble/setup.bash
           source install/setup.bash
-          python3 -m pytest -m ros tests/test_ros_scenario.py tests/test_ros_diagnostics.py --junitxml=ros-tests.xml
+          python3 -m pytest -m ros tests/test_ros_scenario.py tests/test_ros_diagnostics.py tests/test_ros_camera_calibration.py --junitxml=ros-tests.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:

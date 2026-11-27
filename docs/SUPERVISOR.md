@@ -1,35 +1,104 @@
 # Orin Supervisor deployment
 
-`physical_orin.launch.py` and `simulation_orin.launch.py` start the Catbot
-`catbot_supervisor/orin` service host alongside the sensing/kinematics bridge.
-They do not launch a policy directly, start the Pi over SSH, or enable motion.
-The operator starts the Pi's own Foundation/RPi Supervisor launch separately.
+`physical_orin.launch.py` starts the Catbot `catbot_supervisor/orin` service host
+alongside the sensing/kinematics bridge. By default it also starts the Pi's
+Foundation/RPi Supervisor launch over SSH. It does not start policy inference or
+enable motion. Use `start_pi:=false` when the Pi services are managed separately.
 `physical_pi` is deprecated because it bypasses this ownership model;
 `simulation_pi` retains its legacy inference experiment path.
 
 Orin-owned settings live in `src/catbot_launcher/config/orin_supervisor.yaml`.
 Existing scenario arguments select policy artifacts, device and worker paths.
 The supervisor receives the scenario name and all policy settings; policy process
-start belongs to Pi scripts, after Orin preflight succeeds. Both managed hardware
-and simulation validate the bridge's `/policy/contract` before reporting ready.
-No unsupervised policy publisher is added by either Orin-hosted scenario.
+start is an explicit operator action after Orin preflight succeeds. Hardware
+policy validates the bridge's `/policy/contract` before reporting ready.
 
 ```bash
 # On Orin, after building and sourcing the pinned packages:
 ros2 launch catbot_launcher physical_orin.launch.py
-# For simulation instead:
-ros2 launch catbot_launcher simulation_orin.launch.py enable_camera:=false
-# On Pi, build/source the SAME Catbot interface revision, then:
+# Orin-only orchestration when the Pi services are already running separately:
+ros2 launch catbot_launcher physical_orin.launch.py start_pi:=false
+# With start_pi:=false, start the Pi separately after sourcing its ROS overlay:
 ros2 launch catbot_supervisor rpi.launch.py
-ros2 service call /rpi/supervisor/script catbot_interfaces/srv/RunScript '{name: startup}'
-# Startup can move hardware. Inspect ready before requesting run.
-ros2 service call /rpi/supervisor/run std_srvs/srv/Trigger '{}'
 ```
 
-Simulation also waits for a Pi protocol peer to start the policy and forward/ack
-its proposals. The scenario test supplies a peer, not a hardware Pi. A full robot
-simulation of Pi body maintenance is not added here. Do not direct simulation
-commands at a physical Foundation instance.
+The SSH path uses `remote_host`, `remote_user`, `remote_environment`,
+`remote_ros_overlay`, `remote_mapping_file`, and `remote_network_interface` from
+`scenarios.yaml`. Prepare/build the Pi first and configure passwordless SSH from
+Orin. The default overlay is `/home/catbot/.local/share/catbot/ros/install/setup.bash`,
+created by `catbot setup` on the Pi. The shared environment file supplies ROS and
+DDS settings before the overlay is sourced. Stop separate Pi/Orin launches before
+using the combined launch. Stopping it closes the SSH lease; the remote supervisor
+shuts down its Pi process group, with escalation if it does not exit.
+
+These launches start infrastructure only: camera/sensors, kinematics/visualization
+bridge, diagnostics, Foxglove Bridge and the Orin service host. Pi boot only
+disarms. No policy, calibration, homing or registered control script starts
+automatically. With fresh Pi probes and passing preflight, stopped policy is a
+healthy `standby` heartbeat, not a degraded condition. Actual resource, clock,
+worker and action-stream failures remain reported; a crash is not standby.
+Pi status is `idle` (disarmed) until a script is explicitly requested. Service
+readiness does not mean that the robot has already been armed or calibrated.
+
+Import the pinned Catbot's
+`external/Catbot/src/catbot_supervisor/foxglove/operator-controls.json` into
+Foxglove (Layouts > Import from file). This is exported-layout JSON, not the SDK
+notebook format. Connect to `ws://<ORIN-IP>:8765` using the shared ROS domain and
+discovery settings. Then choose operations in Foxglove:
+
+- **Home robot** requests `home_robot` on the Pi. All knees and flexion/extension
+  actuators home in one eight-axis batch; all must finish before arming. It requires
+  operator clearance before abduction homing and leaves homed axes armed/holding.
+- **Motor calibration** requests full calibration for all 12 actuators in
+  parallel, then homes all knees and flexion/extension together
+  (`flk, frk, blk, brk, flf, frf, blf, brf`). It waits for all eight to finish
+  before arming them, then homes and arms back abduction. It
+  moves `flf, frf` to +30 degrees, waits for clearance confirmation, then homes
+  and arms `fla, fra`, then returns `flf, frf` together to 0 degrees and waits
+  for settled measured feedback. Each homing group must fully return to IDLE before arming;
+  the sequence ends in local holding with policy forwarding disabled. See the
+  pinned Catbot supervisor README for the completion checks and timeouts.
+  Script arming requests closed loop (state 8) only and confirms readiness; it
+  does not write trajectory limits, controller modes, or a hold-position target.
+  Explicit position moves select position/trapezoidal mode and enter closed loop
+  automatically, preserving speed/acceleration limits. Policy forwarding still
+  requires the separate RUN request. Emergency latches Foundation move/arm
+  commands until the Pi's explicit recovery confirms stopped axes and clears the latch.
+- **Start policy (no motor commands)** requests only the Orin `policy` job.
+  It does not run any robot script, clear faults, home or arm motors.
+- **RUN — ENABLE POLICY MOTION** is a separate explicit request after the motors
+  are ready and policy readiness/fresh actions are verified.
+- **Pause** holds the last targets. **Stop policy — keep holding** closes Pi
+  forwarding before stopping inference; **E-STOP** disarms and stops policy.
+- **Run named script** accepts any installed registry name shown in
+  `available_scripts` on `/rpi/supervisor/status`, including future entry points.
+
+Actuator faults/readiness failures latch emergency with `stop_behavior: hold_healthy`:
+policy forwarding stops, healthy closed-loop axes hold their measured positions,
+and faulted/unavailable or homing/calibrating axes receive IDLE. No speed or
+acceleration limits change and no axis is re-armed. Clear the underlying fault,
+then explicitly call `/rpi/supervisor/recover`; it leaves existing holds intact
+and does not resume a script or policy. After this recovery, `idle` describes the
+supervisor gate, and some motors can still be in closed loop.
+
+Explicit **E-STOP**, link/action watchdogs, stale Foundation feedback, unhealthy
+Pi readings and script timeouts still disarm all axes (`stop_behavior: idle_all`).
+E-stop overrides a holding fault and requires confirmed IDLE before recovery.
+
+Starting inference and executing a robot control script are independent. Local
+scripts need Pi/body health, not an active policy; scripts needing the Orin link
+must include an explicit `wait_link` step. Starting policy may fail until
+preflight/providers are healthy, and never implicitly enables robot motion.
+The CPU kinematics worker is infrastructure and runs at launch even in hardware
+mode; it needs the saved run's model/config to match its installed training
+revision. A config-schema mismatch in that worker must be repaired with the
+existing `catbot_policy.rollout_setup.prepare_rollout` helper before the full
+stack can become healthy. It is not evidence that a trained policy was started.
+
+`simulation_orin.launch.py` is all-local: it starts its policy automatically and
+never starts Pi hardware services, regardless of `start_pi`. It validates the
+simulator contract and sends commands directly to the simulator. Use the physical
+launch above for operator-controlled hardware standby.
 
 The shared Catbot package documents the API. Useful endpoints:
 
@@ -66,3 +135,17 @@ physical Foundation subscribed and check on the real Orin: heartbeat/telemetry,
 preflight including skew, Pi-script-driven start/stop/restart, verified bundle ID,
 stale action degradation, probe-lease expiry, and process cleanup. A simulated
 peer does not establish physical CAN safety, camera health, or CUDA compatibility.
+
+When the Pi is powered off, launch Orin with `start_pi:=false`. Orin status now
+includes `pi.available`, `pi.state` (`waiting`, `connected`, `lost`), and the age
+of its last supervisor probe. Missing probes produce an actionable `Pi unavailable`
+reason before clock preflight errors. This does not claim to detect electrical
+power: a disconnected network or stopped Pi supervisor has the same observation.
+Policy and motion remain blocked until fresh Pi communication is restored.
+
+Hardware kinematics now uses the pinned rollout worker's native MuJoCo projector.
+It does not initialize the training/mjlab/Warp runtime; simulation retains that
+backend. Use `device:=cpu` for the hardware projector. The contract and measured
+feedback layout are unchanged, with real producer/backend parity tests in the
+rollout repository. Policy readiness still requires actual measured feedback and
+all Pi gates; faster contract delivery does not bypass those requirements.

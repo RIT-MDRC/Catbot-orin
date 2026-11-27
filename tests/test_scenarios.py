@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from catbot_launcher.scenarios import (
     ExpandedSettings,
@@ -104,18 +106,29 @@ def test_array_length_cannot_change(values):
 
 
 @pytest.mark.parametrize(
-    "scenario,camera,monitor_camera,motors",
+    "scenario,camera,monitor_camera,motors,start_pi",
     [
-        ("simulation_orin", "auto", "false", "false"),
-        ("simulation_pi", "auto", "false", "false"),
-        ("physical_orin", "auto", "true", "true"),
-        ("physical_pi", "auto", "true", "true"),
-        ("physical_orin", "false", "true", "true"),
-        ("simulation_orin", "true", "true", "false"),
+        ("simulation_orin", "auto", "false", "false", False),
+        ("simulation_orin", "auto", "false", "false", True),
+        ("simulation_pi", "auto", "false", "false", False),
+        ("simulation_pi", "auto", "false", "false", True),
+        ("physical_orin", "auto", "true", "true", True),
+        ("physical_orin", "auto", "true", "true", False),
+        ("physical_pi", "auto", "true", "true", False),
+        ("physical_orin", "false", "true", "true", False),
+        ("simulation_orin", "true", "true", "false", False),
     ],
 )
+@pytest.mark.parametrize("saved_mount", [False, True])
 def test_launch_applies_overrides_and_routes_workers(
-    monkeypatch, tmp_path, scenario, camera, monitor_camera, motors
+    monkeypatch,
+    tmp_path,
+    scenario,
+    camera,
+    monitor_camera,
+    motors,
+    start_pi,
+    saved_mount,
 ):
     """Execute launch assembly using controlled YAML and CLI overrides."""
     import sys
@@ -164,12 +177,33 @@ def test_launch_applies_overrides_and_routes_workers(
         "scenario": scenario,
         "run_directory": str(tmp_path),
         "enable_camera": camera,
+        "start_pi": str(start_pi).lower(),
+        "rpi_heartbeat_timeout_seconds": "0.85",
+        "rpi_encoder_timeout_seconds": "0.45",
         "imu_topic": "/custom/imu",
         "odom_topic": "/custom/odom",
         "worker_timeout": "7.5",
         "body_to_camera_xyz": "[0.4, -0.2, 0.1]",
         "estimate_contacts": "true",
+        "enable_camera_calibration": str(start_pi).lower(),
     }
+    expected_xyz = [0.4, -0.2, 0.1]
+    if saved_mount:
+        from catbot_sim.camera_calibration import save_calibration
+
+        xml = "<mujoco/>"
+        (tmp_path / "model.xml").write_text(xml)
+        expected_xyz = [0.35, 0.02, 0.07]
+        calibration = tmp_path / "camera.json"
+        save_calibration(
+            calibration,
+            {
+                "body_from_camera_wxyz": [1, 0, 0, 0],
+                "body_to_camera_xyz": expected_xyz,
+            },
+            xml,
+        )
+        raw["camera_calibration_file"] = str(calibration)
     modules["launch.substitutions"]["LaunchConfiguration"].side_effect = lambda key: (
         SimpleNamespace(perform=lambda context: raw[key])
     )
@@ -197,10 +231,36 @@ def test_launch_applies_overrides_and_routes_workers(
         "hardware" if scenario.startswith("physical") else "simulation"
     )
     assert bridge["worker_timeout"] == 7.5
-    assert bridge["body_to_camera_xyz"] == [0.4, -0.2, 0.1]
+    assert bridge["camera_ground_height"] == 0.28
+    assert bridge["camera_height_frame"] == "front_center"
+    assert bridge["body_to_camera_xyz"] == expected_xyz
     assert bridge["estimate_contacts"] is True
     assert bridge["mapping_file"] == "/test workspace/mapping.json"
-    if scenario.endswith("orin"):
+    calibrators = [
+        call.kwargs
+        for call in modules["launch_ros.actions"]["Node"].call_args_list
+        if call.kwargs["executable"] == "camera_calibration"
+    ]
+    assert bool(calibrators) is (scenario == "physical_orin" and start_pi)
+    if calibrators:
+        parameters = calibrators[0]["parameters"][0]
+        assert parameters["body_to_camera_xyz"] == expected_xyz
+        assert parameters["run_directory"] == str(tmp_path)
+        assert parameters["imu_topic"] == "/custom/imu"
+    if scenario == "simulation_orin":
+        assert "catbot_supervisor" not in nodes
+        policy_node = nodes["catbot_policy"]
+        assert policy_node["executable"] == "policy"
+        assert policy_node["prefix"] == "/test/python3"
+        policy = policy_node["parameters"][0]
+        assert policy["policy_bundle"] == "/test workspace/bundle"
+        assert policy["feedback_timeout"] == 0.6
+        assert policy["simulation_mode"] is True
+        assert policy["supervised_actions"] is False
+        assert policy["require_provider_contract"] is True
+        assert policy["provider_contract_topic"] == "/policy/contract"
+    elif scenario == "physical_orin":
+        assert "catbot_policy" not in nodes
         policy = nodes["catbot_supervisor"]["parameters"][0]
         assert policy["policy_bundle"] == "/test workspace/bundle"
         assert policy["feedback_timeout"] == 0.6
@@ -210,7 +270,24 @@ def test_launch_applies_overrides_and_routes_workers(
     else:
         assert "catbot_policy" not in nodes
     processes = modules["launch.actions"]["ExecuteProcess"].call_args_list
-    if scenario.endswith("orin"):
+    if scenario == "physical_orin" and start_pi:
+        assert len(processes) == 1
+        command = processes[0].kwargs["cmd"]
+        options = dict(zip(command[4::2], command[5::2], strict=True))
+        rpi_arguments = json.loads(options.pop("--rpi-launch-arguments"))
+        assert rpi_arguments["heartbeat_timeout_seconds"] == 0.85
+        assert rpi_arguments["encoder_timeout_seconds"] == 0.45
+        assert options == {
+            "--role": "supervisor",
+            "--host": "test-pi.local",
+            "--user": "test-user",
+            "--workspace": "/remote workspace",
+            "--environment": "/remote environment.bash",
+            "--ros-overlay": "/remote overlay/setup.bash",
+            "--network-interface": "test-eth",
+            "--mapping-file": "/remote workspace/mapping.json",
+        }
+    elif scenario.endswith("orin"):
         assert not processes
     else:
         command = processes[0].kwargs["cmd"]
@@ -226,3 +303,9 @@ def test_launch_applies_overrides_and_routes_workers(
         assert options["--policy-bundle"] == "/remote workspace/bundle"
         assert options["--feedback-timeout"] == "0.6"
         assert options["--host"] == "test-pi.local"
+
+
+def test_json_job_configuration_is_literal_not_a_path_template():
+    raw = '{"eval": ["python", "-c", "print({})"]}'
+    settings = ExpandedSettings({"supervisor_offline_jobs_json": raw})
+    assert settings["supervisor_offline_jobs_json"] == raw

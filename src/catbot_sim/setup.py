@@ -17,6 +17,7 @@ setup(
         "console_scripts": [
             "bridge = catbot_sim.bridge:main",
             "remote = catbot_sim.remote:main",
+            "camera_calibration = catbot_sim.camera_calibration_node:main",
         ]
     },
 )

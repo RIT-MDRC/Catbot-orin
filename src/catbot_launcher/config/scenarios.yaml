@@ -5,6 +5,10 @@ remote_user: catbot
 remote_workspace: /home/catbot/main
 # Sources ROS and the Pi's shared DDS exports before its workspace and nodes.
 remote_environment: /home/catbot/.config/catbot/ros_environment.bash
+# Disarm-only Pi service startup for physical_orin; opt out with start_pi:=false.
+start_pi: true
+remote_ros_overlay: '/home/{remote_user}/.local/share/catbot/ros/install/setup.bash'
+remote_network_interface: eth0
 run_id: ''
 checkpoint: ''
 policy_entity: hiromon-rochester-institute-of-technology
@@ -37,16 +41,33 @@ remote_policy_torch_compatibility: auto
 command_timeout: 0.25
 worker_timeout: 2.0
 feedback_timeout: 0.25
-visualization_rate: 30.0
+visualization_rate: 5.0
 startup_timeout: 120.0
 sensor_timeout: 0.25
 sensor_max_skew: 0.1
 ground_height_offset: 0.35
+# Fit depth while the policy is stopped and use the same ground for model TF and
+# policy height. Until a reliable plane is available, show only a default-aligned
+# model preview and hold policy feedback.
+estimate_ground_from_depth: true
+# Optional tape-measure override; disable depth grounding before enabling this.
+# Zero uses depth for camera mount calibration as well.
+camera_ground_height: 0.0
+camera_height_frame: '{camera_name}_camera_center'
 contact_height: 0.02
 estimate_contacts: true
-body_from_camera_wxyz: [1.0, 0.0, 0.0, 0.0]
+# ZED odom axes start at the camera pose; use its gravity-aligned map for the body.
+world_frame: map
+# Front ZED2i: RIGHT lens on top; body-axis RPY [-90, +30, 0] degrees.
+# +30 pitch aims camera X forward/down. Quaternion order is w,x,y,z.
+body_from_camera_wxyz: [0.6830127018922194, -0.6830127018922193, 0.1830127018922193, 0.1830127018922193]
+# Share the camera mount with the IMU, composing the ZED's factory IMU TF.
+imu_mount_from_tf: true
+# Used only when imu_mount_from_tf:=false (custom/non-ZED sensor setups).
 body_from_imu_wxyz: [1.0, 0.0, 0.0, 0.0]
-body_to_camera_xyz: [0.0, 0.0, 0.0]
+# Provisional: torso front face x=0.275 m + 0.20 m protrusion = 0.475 m.
+# Body-frame meters to zed_camera_link (mount point); y/z await measurement.
+body_to_camera_xyz: [0.475, 0.0, 0.0]
 imu_includes_gravity: true
 camera_model: zed2i
 camera_name: zed
@@ -54,6 +75,13 @@ serial_number: '0'
 imu_topic: '/{camera_name}/zed_node/imu/data'
 odom_topic: '/{camera_name}/zed_node/odom'
 contact_topic: /body/state/foot_contacts
+# Explicit stationary calibration services; saving does not change a running mount.
+enable_camera_calibration: true
+camera_calibration_file: ''
+camera_calibration_output: '~/.config/catbot/camera_calibration.json'
+camera_frame: '{camera_name}_camera_link'
+depth_topic: '/{camera_name}/zed_node/depth/depth_registered'
+camera_info_topic: '/{camera_name}/zed_node/depth/camera_info'
 enable_foxglove: true
 enable_diagnostics: true
 # Health reporting thresholds, independent of the motion-control safety timeouts.

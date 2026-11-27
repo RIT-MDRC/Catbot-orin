@@ -4,6 +4,9 @@ remote_host: test-pi.local
 remote_user: test-user
 remote_workspace: /remote workspace
 remote_environment: /remote environment.bash
+start_pi: false
+remote_ros_overlay: '/remote overlay/setup.bash'
+remote_network_interface: test-eth
 run_id: ''
 checkpoint: ''
 policy_entity: test-team
@@ -36,10 +39,15 @@ startup_timeout: 40.0
 sensor_timeout: 0.5
 sensor_max_skew: 0.15
 ground_height_offset: 0.25
+estimate_ground_from_depth: false
+camera_ground_height: 0.28
+camera_height_frame: '{camera_name}_center'
 contact_height: 0.03
 estimate_contacts: false
 body_from_camera_wxyz: [1.0, 0.0, 0.0, 0.0]
 body_from_imu_wxyz: [1.0, 0.0, 0.0, 0.0]
+imu_mount_from_tf: false
+world_frame: ''
 body_to_camera_xyz: [0.1, 0.2, 0.3]
 imu_includes_gravity: false
 camera_model: test-camera
