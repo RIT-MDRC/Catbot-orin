@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from catbot_launcher.scenarios import (
     ExpandedSettings,
@@ -176,6 +178,8 @@ def test_launch_applies_overrides_and_routes_workers(
         "run_directory": str(tmp_path),
         "enable_camera": camera,
         "start_pi": str(start_pi).lower(),
+        "rpi_heartbeat_timeout_seconds": "0.85",
+        "rpi_encoder_timeout_seconds": "0.45",
         "imu_topic": "/custom/imu",
         "odom_topic": "/custom/odom",
         "worker_timeout": "7.5",
@@ -270,6 +274,9 @@ def test_launch_applies_overrides_and_routes_workers(
         assert len(processes) == 1
         command = processes[0].kwargs["cmd"]
         options = dict(zip(command[4::2], command[5::2], strict=True))
+        rpi_arguments = json.loads(options.pop("--rpi-launch-arguments"))
+        assert rpi_arguments["heartbeat_timeout_seconds"] == 0.85
+        assert rpi_arguments["encoder_timeout_seconds"] == 0.45
         assert options == {
             "--role": "supervisor",
             "--host": "test-pi.local",

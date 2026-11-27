@@ -102,6 +102,14 @@ def test_supervisor_sources_cli_overlay_without_policy_artifacts(
         str(overlay),
         "--network-interface",
         "test eth",
+        "--rpi-launch-arguments",
+        json.dumps(
+            {
+                "heartbeat_timeout_seconds": 0.85,
+                "encoder_timeout_seconds": 0.45,
+                "protocol_config_file": "/test protocol/hardware.json",
+            }
+        ),
     ]
     remote.main()
     shipped = shlex.split(spawn.call_args.args[0][-1])
@@ -120,6 +128,9 @@ def test_supervisor_sources_cli_overlay_without_policy_artifacts(
         "rpi.launch.py",
         "network_interface:=test eth",
         "mapping_file:=/mapping",
+        "heartbeat_timeout_seconds:=0.85",
+        "encoder_timeout_seconds:=0.45",
+        "protocol_config_file:=/test protocol/hardware.json",
     ]
 
 
@@ -333,3 +344,22 @@ def test_requested_stop_suppresses_ssh_signal_exit(ssh, monkeypatch):
     remote.main()
     assert stop.set.call_count == 2
     child.stdin.write.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"unknown": 1},
+        {"heartbeat_timeout_seconds": 0},
+        {"encoder_timeout_seconds": float("nan")},
+        {"hardware_config_file": 3},
+        [],
+        {"heartbeat_timeout_seconds": True},
+    ],
+)
+def test_invalid_pi_launch_arguments_never_start_ssh(ssh, settings):
+    argv, _, spawn = ssh
+    argv += ["--role", "supervisor", "--rpi-launch-arguments", json.dumps(settings)]
+    with pytest.raises(SystemExit):
+        remote.main()
+    spawn.assert_not_called()

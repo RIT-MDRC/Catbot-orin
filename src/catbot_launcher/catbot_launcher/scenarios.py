@@ -11,6 +11,8 @@ import yaml
 from catbot_policy.artifacts import available_models, resolve_downloaded
 from catbot_policy.configuration import POLICY_PARAMETERS
 from catbot_policy.worker_launch import WorkerLaunchSpec
+from catbot_supervisor.rpi_configuration import RPI_DEFAULTS
+from foundation.configuration import FOUNDATION_DEFAULTS
 
 SCENARIOS = {
     "physical_pi": ("hardware", "pi", "both"),
@@ -143,6 +145,14 @@ def build_launch(default_scenario="physical_orin"):
         "/home/{remote_user}/.local/share/catbot/ros/install/setup.bash",
     )
     defaults.setdefault("remote_network_interface", "eth0")
+    pi_defaults = {
+        **RPI_DEFAULTS,
+        **FOUNDATION_DEFAULTS,
+        "hardware_config_file": "",
+        "protocol_config_file": "",
+    }
+    for key, value in pi_defaults.items():
+        defaults.setdefault("rpi_" + key, value)
     defaults.setdefault("imu_mount_from_tf", True)
     defaults.setdefault("world_frame", "map")
     defaults.setdefault("camera_ground_height", 0.0)
@@ -399,6 +409,8 @@ def build_launch(default_scenario="physical_orin"):
                         values["remote_network_interface"],
                         "--mapping-file",
                         values["remote_mapping_file"],
+                        "--rpi-launch-arguments",
+                        json.dumps({key: values["rpi_" + key] for key in pi_defaults}),
                     ],
                 )
             )

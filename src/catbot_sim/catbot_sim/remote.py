@@ -10,6 +10,8 @@ import threading
 from pathlib import Path
 
 from catbot_policy.configuration import POLICY_DEFAULTS, POLICY_PARAMETERS
+from catbot_supervisor.rpi_configuration import RPI_DEFAULTS, validate_positive
+from foundation.configuration import FOUNDATION_DEFAULTS
 
 REMOTE = Path(__file__).with_name("remote_supervisor.py").read_text()
 
@@ -54,10 +56,35 @@ def main():
     parser.add_argument("--ros-overlay", default="")
     parser.add_argument("--network-interface", default="eth0")
     parser.add_argument(
+        "--rpi-launch-arguments",
+        default="{}",
+        help="JSON object of Pi launch operational settings; supervisor role only",
+    )
+    parser.add_argument(
         "--environment",
         default="/home/catbot/.config/catbot/ros_environment.bash",
     )
     args = parser.parse_args()
+    try:
+        rpi_arguments = json.loads(args.rpi_launch_arguments)
+        if not isinstance(rpi_arguments, dict) or set(rpi_arguments) - {*RPI_DEFAULTS, *FOUNDATION_DEFAULTS, "hardware_config_file", "protocol_config_file"}:
+            raise ValueError("Unknown Pi launch setting")
+        if rpi_arguments and args.role != "supervisor":
+            raise ValueError("Pi launch settings require supervisor role")
+        validate_positive(
+            {
+                key: value
+                for key, value in rpi_arguments.items()
+                if key not in ("hardware_config_file", "protocol_config_file")
+            }
+        )
+        if any(
+            not isinstance(rpi_arguments.get(key, ""), str)
+            for key in ("hardware_config_file", "protocol_config_file")
+        ):
+            raise ValueError("Hardware configuration paths must be strings")
+    except (ValueError, TypeError) as error:
+        parser.error(str(error))
     if args.role != "supervisor" and (
         not args.policy_worker_project or not args.policy_bundle
     ):
@@ -96,6 +123,10 @@ def main():
                     "rpi.launch.py",
                     "network_interface:=" + args.network_interface,
                     "mapping_file:=" + args.mapping_file,
+                    *[
+                        name + ":=" + str(value)
+                        for name, value in rpi_arguments.items()
+                    ],
                 ]
             )
         )
