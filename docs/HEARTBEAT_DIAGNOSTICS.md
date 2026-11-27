@@ -24,6 +24,12 @@ faults, and heartbeat lost/restored transitions. It also includes:
 - `host`: process CPU seconds, system load and CAN interface error/drop counters.
   Compare changes between records to derive rates. CPU seconds divided by elapsed
   wall time gives CPU usage relative to one core.
+- `receive.*.socket_memory`: Linux socket receive allocation, buffer limit,
+  backlog bytes and cumulative `drops_total`, read from the existing socket with
+  `SO_MEMINFO`. Unsupported platforms return null. Compare socket-drop deltas as
+  well as interface counters: unchanged interface drops do not establish that
+  the individual receiver socket kept every frame. Linux defines these fields in
+  [sock_diag.h](https://github.com/torvalds/linux/blob/master/include/uapi/linux/sock_diag.h).
 - `writer_delay_ms` and `queue_dropped`: diagnostic backlog and discarded log
   records. A full queue drops diagnostics instead of blocking control callbacks.
 
@@ -43,3 +49,10 @@ tail -n 20 ~/.local/state/catbot/heartbeat/heartbeat.jsonl
 The Foundation startup ROS parameter `heartbeat_diagnostic_log` changes the path;
 an empty string disables this logger. Logging failures are reported once through
 the normal Foundation ROS logger and do not stop CAN processing.
+
+Routine encoder debug logs are limited to once per motor per second by default;
+all samples still update feedback and all fault/state-transition logs remain
+active. `encoder_log_period_seconds` configures this Foundation startup setting
+through the Pi launch, or `rpi_encoder_log_period_seconds` through the Orin
+physical launch. This limiter removes per-frame file output from the hot path
+without raising motor freshness thresholds.
