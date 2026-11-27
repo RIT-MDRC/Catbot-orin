@@ -126,6 +126,7 @@ def main():
                     *[
                         name + ":=" + str(value)
                         for name, value in rpi_arguments.items()
+                        if value != ""
                     ],
                 ]
             )

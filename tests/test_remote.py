@@ -76,8 +76,9 @@ def test_legacy_roles_require_policy_arguments(ssh, missing):
     spawn.assert_not_called()
 
 
+@pytest.mark.parametrize("protocol_path", ["", "/test protocol/hardware.json"])
 def test_supervisor_sources_cli_overlay_without_policy_artifacts(
-    ssh, tmp_path, monkeypatch
+    ssh, tmp_path, monkeypatch, protocol_path
 ):
     argv, _, spawn = ssh
     for option in ("--policy-bundle", "--policy-worker-project"):
@@ -107,7 +108,8 @@ def test_supervisor_sources_cli_overlay_without_policy_artifacts(
             {
                 "heartbeat_timeout_seconds": 0.85,
                 "encoder_timeout_seconds": 0.45,
-                "protocol_config_file": "/test protocol/hardware.json",
+                "hardware_config_file": "",
+                "protocol_config_file": protocol_path,
             }
         ),
     ]
@@ -130,7 +132,7 @@ def test_supervisor_sources_cli_overlay_without_policy_artifacts(
         "mapping_file:=/mapping",
         "heartbeat_timeout_seconds:=0.85",
         "encoder_timeout_seconds:=0.45",
-        "protocol_config_file:=/test protocol/hardware.json",
+        *(["protocol_config_file:=" + protocol_path] if protocol_path else []),
     ]
 
 
